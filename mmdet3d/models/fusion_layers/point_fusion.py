@@ -20,7 +20,7 @@ def point_sample(
     img_pad_shape,
     img_shape,
     aligned=True,
-    padding_mode='zeros',
+    padding_mode="zeros",
     align_corners=True,
 ):
     """Obtain image features using points.
@@ -97,17 +97,19 @@ def point_sample(
     h, w = img_pad_shape
     coor_y = coor_y / h * 2 - 1
     coor_x = coor_x / w * 2 - 1
-    grid = torch.cat([coor_x, coor_y],
-                     dim=1).unsqueeze(0).unsqueeze(0)  # Nx2 -> 1x1xNx2
+    grid = (
+        torch.cat([coor_x, coor_y], dim=1).unsqueeze(0).unsqueeze(0)
+    )  # Nx2 -> 1x1xNx2
 
     # align_corner=True provides higher performance
-    mode = 'bilinear' if aligned else 'nearest'
+    mode = "bilinear" if aligned else "nearest"
     point_features = F.grid_sample(
         img_features,
         grid,
         mode=mode,
         padding_mode=padding_mode,
-        align_corners=align_corners)  # 1xCx1xN feats
+        align_corners=align_corners,
+    )  # 1xCx1xN feats
 
     return point_features.squeeze().t()
 
@@ -146,22 +148,24 @@ class PointFusion(nn.Module):
             to image features. Defaults to True.
     """
 
-    def __init__(self,
-                 img_channels,
-                 pts_channels,
-                 mid_channels,
-                 out_channels,
-                 img_levels=3,
-                 conv_cfg=None,
-                 norm_cfg=None,
-                 act_cfg=None,
-                 activate_out=True,
-                 fuse_out=False,
-                 dropout_ratio=0,
-                 aligned=True,
-                 align_corners=True,
-                 padding_mode='zeros',
-                 lateral_conv=True):
+    def __init__(
+        self,
+        img_channels,
+        pts_channels,
+        mid_channels,
+        out_channels,
+        img_levels=3,
+        conv_cfg=None,
+        norm_cfg=None,
+        act_cfg=None,
+        activate_out=True,
+        fuse_out=False,
+        dropout_ratio=0,
+        aligned=True,
+        align_corners=True,
+        padding_mode="zeros",
+        lateral_conv=True,
+    ):
         super(PointFusion, self).__init__()
         if isinstance(img_levels, int):
             img_levels = [img_levels]
@@ -193,7 +197,8 @@ class PointFusion(nn.Module):
                     conv_cfg=conv_cfg,
                     norm_cfg=norm_cfg,
                     act_cfg=self.act_cfg,
-                    inplace=False)
+                    inplace=False,
+                )
                 self.lateral_convs.append(l_conv)
             self.img_transform = nn.Sequential(
                 nn.Linear(mid_channels * len(img_channels), out_channels),
@@ -215,7 +220,8 @@ class PointFusion(nn.Module):
                 # For pts the BN is initialized differently by default
                 # TODO: check whether this is necessary
                 nn.BatchNorm1d(out_channels, eps=1e-3, momentum=0.01),
-                nn.ReLU(inplace=False))
+                nn.ReLU(inplace=False),
+            )
 
         self.init_weights()
 
@@ -224,7 +230,7 @@ class PointFusion(nn.Module):
         """Initialize the weights of modules."""
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
-                xavier_init(m, distribution='uniform')
+                xavier_init(m, distribution="uniform")
 
     def forward(self, img_feats, pts, pts_feats, img_metas):
         """Forward function.
@@ -239,6 +245,10 @@ class PointFusion(nn.Module):
         Returns:
             torch.Tensor: Fused features of each point.
         """
+        print("img metas =", img_metas)
+        # print("pts =", pts.shape)
+        print("img feats =", img_feats.shape)
+
         img_pts = self.obtain_mlvl_feats(img_feats, pts, img_metas)
         img_pre_fuse = self.img_transform(img_pts)
         if self.training and self.dropout_ratio > 0:
@@ -265,6 +275,7 @@ class PointFusion(nn.Module):
         Returns:
             torch.Tensor: Corresponding image features of each point.
         """
+
         if self.lateral_convs is not None:
             img_ins = [
                 lateral_conv(img_feats[i])
@@ -278,8 +289,10 @@ class PointFusion(nn.Module):
             mlvl_img_feats = []
             for level in range(len(self.img_levels)):
                 mlvl_img_feats.append(
-                    self.sample_single(img_ins[level][i:i + 1], pts[i][:, :3],
-                                       img_metas[i]))
+                    self.sample_single(
+                        img_ins[level][i : i + 1], pts[i][:, :3], img_metas[i]
+                    )
+                )
             mlvl_img_feats = torch.cat(mlvl_img_feats, dim=-1)
             img_feats_per_point.append(mlvl_img_feats)
 
@@ -299,27 +312,34 @@ class PointFusion(nn.Module):
             torch.Tensor: Single level image features of each point.
         """
         pcd_scale_factor = (
-            img_meta['pcd_scale_factor']
-            if 'pcd_scale_factor' in img_meta.keys() else 1)
+            img_meta["pcd_scale_factor"] if "pcd_scale_factor" in img_meta.keys() else 1
+        )
         pcd_trans_factor = (
-            pts.new_tensor(img_meta['pcd_trans'])
-            if 'pcd_trans' in img_meta.keys() else 0)
+            pts.new_tensor(img_meta["pcd_trans"])
+            if "pcd_trans" in img_meta.keys()
+            else 0
+        )
         pcd_rotate_mat = (
-            pts.new_tensor(img_meta['pcd_rotation']) if 'pcd_rotation'
-            in img_meta.keys() else torch.eye(3).type_as(pts).to(pts.device))
+            pts.new_tensor(img_meta["pcd_rotation"])
+            if "pcd_rotation" in img_meta.keys()
+            else torch.eye(3).type_as(pts).to(pts.device)
+        )
         img_scale_factor = (
-            pts.new_tensor(img_meta['scale_factor'][:2])
-            if 'scale_factor' in img_meta.keys() else 1)
-        pcd_flip = img_meta['pcd_flip'] if 'pcd_flip' in img_meta.keys(
-        ) else False
-        img_flip = img_meta['flip'] if 'flip' in img_meta.keys() else False
+            pts.new_tensor(img_meta["scale_factor"][:2])
+            if "scale_factor" in img_meta.keys()
+            else 1
+        )
+        pcd_flip = img_meta["pcd_flip"] if "pcd_flip" in img_meta.keys() else False
+        img_flip = img_meta["flip"] if "flip" in img_meta.keys() else False
         img_crop_offset = (
-            pts.new_tensor(img_meta['img_crop_offset'])
-            if 'img_crop_offset' in img_meta.keys() else 0)
+            pts.new_tensor(img_meta["img_crop_offset"])
+            if "img_crop_offset" in img_meta.keys()
+            else 0
+        )
         img_pts = point_sample(
             img_feats,
             pts,
-            pts.new_tensor(img_meta['lidar2img']),
+            pts.new_tensor(img_meta["lidar2img"]),
             pcd_rotate_mat,
             img_scale_factor,
             img_crop_offset,
@@ -327,8 +347,8 @@ class PointFusion(nn.Module):
             pcd_scale_factor,
             pcd_flip=pcd_flip,
             img_flip=img_flip,
-            img_pad_shape=img_meta['input_shape'][:2],
-            img_shape=img_meta['img_shape'][:2],
+            img_pad_shape=img_meta["input_shape"][:2],
+            img_shape=img_meta["img_shape"][:2],
             aligned=self.aligned,
             padding_mode=self.padding_mode,
             align_corners=self.align_corners,

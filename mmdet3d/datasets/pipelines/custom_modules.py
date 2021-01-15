@@ -20,9 +20,19 @@ class AugmentPointsWithImageFeats:
     def __call__(self, results):
 
         lidar2imgs = results["lidar2img"]
-        # imgs x h x w x channels
+
+        # channels x h x w x cameras
         imgs = results["img"]
+        print("imgs =", imgs.shape)
+        # cameras x h x w x channels
+        reshaped = []
+        for i in range(imgs.shape[-1]):
+            img = imgs[:, :, :, i]
+            reshaped.append(img)
+        reshaped = np.asarray(reshaped)
+        print("reshaped =", reshaped.shape)
         imgs = np.moveaxis(imgs, -1, 0)
+        imgs = reshaped
 
         points = results["points"].tensor
 
@@ -46,30 +56,41 @@ class AugmentPointsWithImageFeats:
             count = 0
             xs = []
             ys = []
+            zs = []
             for p in points_4d:
                 point4d = torch.cat((p[0:3], torch.tensor([1])))
                 point_projected = img_mat @ point4d
+                # print("proj =", point_projected)
+                # print("img mat =", img_mat)
                 x = point_projected[0]
                 y = point_projected[1]
+                z = point_projected[2]
+                x /= z
+                y /= z
+
+                if z < 1.0:
+                    # skip close points
+                    continue
 
                 # print(x, ",", y)
-                if x > 0 and x < 1600 and y > 0 and y < 900:
-                    xs.append(1600 - x.item())
-                    ys.append(900 - y.item())
+                if x >= 0 and x < 1600 and y >= 0 and y < 900:
+                    xs.append(x.item())
+                    ys.append(y.item())
+                    zs.append(z.item())
                     count += 1
                     # hits[int(y), int(x)] = np.asarray([255, 255, 255])
                     # img[int(y), int(x)] = np.asarray([255, 0, 0])
 
             print("count =", count)
             plt.imshow(img, zorder=1)
-            plt.scatter(xs, ys, zorder=2)
+            plt.scatter(xs, ys, zorder=2, s=0.4, c=zs)
 
             plt.savefig("/workspace/work_dirs/plot" + str(idx) + ".png")
             plt.clf()
 
-        raise ValueError("bla")
+        # raise ValueError("bla")
 
-        exit(0)
+        # exit(0)
         # print("\n")
         # print("scale factor =", results["scale_factor"])
         # print("img_norm_cfg =", results["img_norm_cfg"])

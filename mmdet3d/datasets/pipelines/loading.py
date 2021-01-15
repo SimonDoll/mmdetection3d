@@ -18,7 +18,7 @@ class LoadMultiViewImageFromFiles(object):
         color_type (str): Color type of the file. Defaults to 'unchanged'.
     """
 
-    def __init__(self, to_float32=False, color_type='unchanged'):
+    def __init__(self, to_float32=False, color_type="unchanged"):
         self.to_float32 = to_float32
         self.color_type = color_type
 
@@ -40,29 +40,32 @@ class LoadMultiViewImageFromFiles(object):
                 - scale_factor (float): Scale factor.
                 - img_norm_cfg (dict): Normalization configuration of images.
         """
-        filename = results['img_filename']
+        filename = results["img_filename"]
         img = np.stack(
-            [mmcv.imread(name, self.color_type) for name in filename], axis=-1)
+            [mmcv.imread(name, self.color_type) for name in filename], axis=-1
+        )
         if self.to_float32:
             img = img.astype(np.float32)
-        results['filename'] = filename
-        results['img'] = img
-        results['img_shape'] = img.shape
-        results['ori_shape'] = img.shape
+        results["filename"] = filename
+        results["img"] = img
+        results["img_shape"] = img.shape
+        results["ori_shape"] = img.shape
         # Set initial values for default meta_keys
-        results['pad_shape'] = img.shape
-        results['scale_factor'] = 1.0
+        results["pad_shape"] = img.shape
+        results["scale_factor"] = 1.0
         num_channels = 1 if len(img.shape) < 3 else img.shape[2]
-        results['img_norm_cfg'] = dict(
+        results["img_norm_cfg"] = dict(
             mean=np.zeros(num_channels, dtype=np.float32),
             std=np.ones(num_channels, dtype=np.float32),
-            to_rgb=False)
+            to_rgb=False,
+        )
         return results
 
     def __repr__(self):
         """str: Return a string that describes the module."""
         return "{} (to_float32={}, color_type='{}')".format(
-            self.__class__.__name__, self.to_float32, self.color_type)
+            self.__class__.__name__, self.to_float32, self.color_type
+        )
 
 
 @PIPELINES.register_module()
@@ -87,14 +90,16 @@ class LoadPointsFromMultiSweeps(object):
             Defaults to False.
     """
 
-    def __init__(self,
-                 sweeps_num=10,
-                 load_dim=5,
-                 use_dim=[0, 1, 2, 4],
-                 file_client_args=dict(backend='disk'),
-                 pad_empty_sweeps=False,
-                 remove_close=False,
-                 test_mode=False):
+    def __init__(
+        self,
+        sweeps_num=10,
+        load_dim=5,
+        use_dim=[0, 1, 2, 4],
+        file_client_args=dict(backend="disk"),
+        pad_empty_sweeps=False,
+        remove_close=False,
+        test_mode=False,
+    ):
         self.load_dim = load_dim
         self.sweeps_num = sweeps_num
         self.use_dim = use_dim
@@ -120,7 +125,7 @@ class LoadPointsFromMultiSweeps(object):
             points = np.frombuffer(pts_bytes, dtype=np.float32)
         except ConnectionError:
             mmcv.check_file_exist(pts_filename)
-            if pts_filename.endswith('.npy'):
+            if pts_filename.endswith(".npy"):
                 points = np.load(pts_filename)
             else:
                 points = np.fromfile(pts_filename, dtype=np.float32)
@@ -161,46 +166,48 @@ class LoadPointsFromMultiSweeps(object):
 
                 - points (np.ndarray): Multi-sweep point cloud arrays.
         """
-        points = results['points']
+        points = results["points"]
         points.tensor[:, 4] = 0
         sweep_points_list = [points]
-        ts = results['timestamp']
-        if self.pad_empty_sweeps and len(results['sweeps']) == 0:
+        ts = results["timestamp"]
+        if self.pad_empty_sweeps and len(results["sweeps"]) == 0:
             for i in range(self.sweeps_num):
                 if self.remove_close:
                     sweep_points_list.append(self._remove_close(points))
                 else:
                     sweep_points_list.append(points)
         else:
-            if len(results['sweeps']) <= self.sweeps_num:
-                choices = np.arange(len(results['sweeps']))
+            if len(results["sweeps"]) <= self.sweeps_num:
+                choices = np.arange(len(results["sweeps"]))
             elif self.test_mode:
                 choices = np.arange(self.sweeps_num)
             else:
                 choices = np.random.choice(
-                    len(results['sweeps']), self.sweeps_num, replace=False)
+                    len(results["sweeps"]), self.sweeps_num, replace=False
+                )
             for idx in choices:
-                sweep = results['sweeps'][idx]
-                points_sweep = self._load_points(sweep['data_path'])
+                sweep = results["sweeps"][idx]
+                points_sweep = self._load_points(sweep["data_path"])
                 points_sweep = np.copy(points_sweep).reshape(-1, self.load_dim)
                 if self.remove_close:
                     points_sweep = self._remove_close(points_sweep)
-                sweep_ts = sweep['timestamp'] / 1e6
-                points_sweep[:, :3] = points_sweep[:, :3] @ sweep[
-                    'sensor2lidar_rotation'].T
-                points_sweep[:, :3] += sweep['sensor2lidar_translation']
+                sweep_ts = sweep["timestamp"] / 1e6
+                points_sweep[:, :3] = (
+                    points_sweep[:, :3] @ sweep["sensor2lidar_rotation"].T
+                )
+                points_sweep[:, :3] += sweep["sensor2lidar_translation"]
                 points_sweep[:, 4] = ts - sweep_ts
                 points_sweep = points.new_point(points_sweep)
                 sweep_points_list.append(points_sweep)
 
         points = points.cat(sweep_points_list)
         points = points[:, self.use_dim]
-        results['points'] = points
+        results["points"] = points
         return results
 
     def __repr__(self):
         """str: Return a string that describes the module."""
-        return f'{self.__class__.__name__}(sweeps_num={self.sweeps_num})'
+        return f"{self.__class__.__name__}(sweeps_num={self.sweeps_num})"
 
 
 @PIPELINES.register_module()
@@ -229,8 +236,8 @@ class PointSegClassMapping(object):
 
                 - pts_semantic_mask (np.ndarray): Mapped semantic masks.
         """
-        assert 'pts_semantic_mask' in results
-        pts_semantic_mask = results['pts_semantic_mask']
+        assert "pts_semantic_mask" in results
+        pts_semantic_mask = results["pts_semantic_mask"]
         neg_cls = len(self.valid_cat_ids)
 
         for i in range(pts_semantic_mask.shape[0]):
@@ -240,13 +247,13 @@ class PointSegClassMapping(object):
             else:
                 pts_semantic_mask[i] = neg_cls
 
-        results['pts_semantic_mask'] = pts_semantic_mask
+        results["pts_semantic_mask"] = pts_semantic_mask
         return results
 
     def __repr__(self):
         """str: Return a string that describes the module."""
         repr_str = self.__class__.__name__
-        repr_str += '(valid_cat_ids={})'.format(self.valid_cat_ids)
+        repr_str += "(valid_cat_ids={})".format(self.valid_cat_ids)
         return repr_str
 
 
@@ -273,17 +280,18 @@ class NormalizePointsColor(object):
 
                 - points (np.ndarray): Points after color normalization.
         """
-        points = results['points']
-        assert points.shape[1] >= 6,\
-            f'Expect points have channel >=6, got {points.shape[1]}'
+        points = results["points"]
+        assert (
+            points.shape[1] >= 6
+        ), f"Expect points have channel >=6, got {points.shape[1]}"
         points[:, 3:6] = points[:, 3:6] - np.array(self.color_mean) / 256.0
-        results['points'] = points
+        results["points"] = points
         return results
 
     def __repr__(self):
         """str: Return a string that describes the module."""
         repr_str = self.__class__.__name__
-        repr_str += '(color_mean={})'.format(self.color_mean)
+        repr_str += "(color_mean={})".format(self.color_mean)
         return repr_str
 
 
@@ -310,18 +318,21 @@ class LoadPointsFromFile(object):
             for more details. Defaults to dict(backend='disk').
     """
 
-    def __init__(self,
-                 coord_type,
-                 load_dim=6,
-                 use_dim=[0, 1, 2],
-                 shift_height=False,
-                 file_client_args=dict(backend='disk')):
+    def __init__(
+        self,
+        coord_type,
+        load_dim=6,
+        use_dim=[0, 1, 2],
+        shift_height=False,
+        file_client_args=dict(backend="disk"),
+    ):
         self.shift_height = shift_height
         if isinstance(use_dim, int):
             use_dim = list(range(use_dim))
-        assert max(use_dim) < load_dim, \
-            f'Expect all used dimensions < {load_dim}, got {use_dim}'
-        assert coord_type in ['CAMERA', 'LIDAR', 'DEPTH']
+        assert (
+            max(use_dim) < load_dim
+        ), f"Expect all used dimensions < {load_dim}, got {use_dim}"
+        assert coord_type in ["CAMERA", "LIDAR", "DEPTH"]
 
         self.coord_type = coord_type
         self.load_dim = load_dim
@@ -345,7 +356,7 @@ class LoadPointsFromFile(object):
             points = np.frombuffer(pts_bytes, dtype=np.float32)
         except ConnectionError:
             mmcv.check_file_exist(pts_filename)
-            if pts_filename.endswith('.npy'):
+            if pts_filename.endswith(".npy"):
                 points = np.load(pts_filename)
             else:
                 points = np.fromfile(pts_filename, dtype=np.float32)
@@ -364,7 +375,7 @@ class LoadPointsFromFile(object):
 
                 - points (np.ndarray): Point clouds data.
         """
-        pts_filename = results['pts_filename']
+        pts_filename = results["pts_filename"]
         points = self._load_points(pts_filename)
         points = points.reshape(-1, self.load_dim)
         points = points[:, self.use_dim]
@@ -378,18 +389,19 @@ class LoadPointsFromFile(object):
 
         points_class = get_points_type(self.coord_type)
         points = points_class(
-            points, points_dim=points.shape[-1], attribute_dims=attribute_dims)
-        results['points'] = points
+            points, points_dim=points.shape[-1], attribute_dims=attribute_dims
+        )
+        results["points"] = points
 
         return results
 
     def __repr__(self):
         """str: Return a string that describes the module."""
-        repr_str = self.__class__.__name__ + '('
-        repr_str += 'shift_height={}, '.format(self.shift_height)
-        repr_str += 'file_client_args={}), '.format(self.file_client_args)
-        repr_str += 'load_dim={}, '.format(self.load_dim)
-        repr_str += 'use_dim={})'.format(self.use_dim)
+        repr_str = self.__class__.__name__ + "("
+        repr_str += "shift_height={}, ".format(self.shift_height)
+        repr_str += "file_client_args={}), ".format(self.file_client_args)
+        repr_str += "load_dim={}, ".format(self.load_dim)
+        repr_str += "use_dim={})".format(self.use_dim)
         return repr_str
 
 
@@ -424,24 +436,27 @@ class LoadAnnotations3D(LoadAnnotations):
             for more details.
     """
 
-    def __init__(self,
-                 with_bbox_3d=True,
-                 with_label_3d=True,
-                 with_mask_3d=False,
-                 with_seg_3d=False,
-                 with_bbox=False,
-                 with_label=False,
-                 with_mask=False,
-                 with_seg=False,
-                 poly2mask=True,
-                 file_client_args=dict(backend='disk')):
+    def __init__(
+        self,
+        with_bbox_3d=True,
+        with_label_3d=True,
+        with_mask_3d=False,
+        with_seg_3d=False,
+        with_bbox=False,
+        with_label=False,
+        with_mask=False,
+        with_seg=False,
+        poly2mask=True,
+        file_client_args=dict(backend="disk"),
+    ):
         super().__init__(
             with_bbox,
             with_label,
             with_mask,
             with_seg,
             poly2mask,
-            file_client_args=file_client_args)
+            file_client_args=file_client_args,
+        )
         self.with_bbox_3d = with_bbox_3d
         self.with_label_3d = with_label_3d
         self.with_mask_3d = with_mask_3d
@@ -456,8 +471,8 @@ class LoadAnnotations3D(LoadAnnotations):
         Returns:
             dict: The dict containing loaded 3D bounding box annotations.
         """
-        results['gt_bboxes_3d'] = results['ann_info']['gt_bboxes_3d']
-        results['bbox3d_fields'].append('gt_bboxes_3d')
+        results["gt_bboxes_3d"] = results["ann_info"]["gt_bboxes_3d"]
+        results["bbox3d_fields"].append("gt_bboxes_3d")
         return results
 
     def _load_labels_3d(self, results):
@@ -469,7 +484,7 @@ class LoadAnnotations3D(LoadAnnotations):
         Returns:
             dict: The dict containing loaded label annotations.
         """
-        results['gt_labels_3d'] = results['ann_info']['gt_labels_3d']
+        results["gt_labels_3d"] = results["ann_info"]["gt_labels_3d"]
         return results
 
     def _load_masks_3d(self, results):
@@ -481,7 +496,7 @@ class LoadAnnotations3D(LoadAnnotations):
         Returns:
             dict: The dict containing loaded 3D mask annotations.
         """
-        pts_instance_mask_path = results['ann_info']['pts_instance_mask_path']
+        pts_instance_mask_path = results["ann_info"]["pts_instance_mask_path"]
 
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
@@ -490,11 +505,10 @@ class LoadAnnotations3D(LoadAnnotations):
             pts_instance_mask = np.frombuffer(mask_bytes, dtype=np.int)
         except ConnectionError:
             mmcv.check_file_exist(pts_instance_mask_path)
-            pts_instance_mask = np.fromfile(
-                pts_instance_mask_path, dtype=np.long)
+            pts_instance_mask = np.fromfile(pts_instance_mask_path, dtype=np.long)
 
-        results['pts_instance_mask'] = pts_instance_mask
-        results['pts_mask_fields'].append('pts_instance_mask')
+        results["pts_instance_mask"] = pts_instance_mask
+        results["pts_mask_fields"].append("pts_instance_mask")
         return results
 
     def _load_semantic_seg_3d(self, results):
@@ -506,7 +520,7 @@ class LoadAnnotations3D(LoadAnnotations):
         Returns:
             dict: The dict containing the semantic segmentation annotations.
         """
-        pts_semantic_mask_path = results['ann_info']['pts_semantic_mask_path']
+        pts_semantic_mask_path = results["ann_info"]["pts_semantic_mask_path"]
 
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
@@ -516,11 +530,10 @@ class LoadAnnotations3D(LoadAnnotations):
             pts_semantic_mask = np.frombuffer(mask_bytes, dtype=np.int).copy()
         except ConnectionError:
             mmcv.check_file_exist(pts_semantic_mask_path)
-            pts_semantic_mask = np.fromfile(
-                pts_semantic_mask_path, dtype=np.long)
+            pts_semantic_mask = np.fromfile(pts_semantic_mask_path, dtype=np.long)
 
-        results['pts_semantic_mask'] = pts_semantic_mask
-        results['pts_seg_fields'].append('pts_semantic_mask')
+        results["pts_semantic_mask"] = pts_semantic_mask
+        results["pts_seg_fields"].append("pts_semantic_mask")
         return results
 
     def __call__(self, results):
@@ -549,15 +562,15 @@ class LoadAnnotations3D(LoadAnnotations):
 
     def __repr__(self):
         """str: Return a string that describes the module."""
-        indent_str = '    '
-        repr_str = self.__class__.__name__ + '(\n'
-        repr_str += f'{indent_str}with_bbox_3d={self.with_bbox_3d}, '
-        repr_str += f'{indent_str}with_label_3d={self.with_label_3d}, '
-        repr_str += f'{indent_str}with_mask_3d={self.with_mask_3d}, '
-        repr_str += f'{indent_str}with_seg_3d={self.with_seg_3d}, '
-        repr_str += f'{indent_str}with_bbox={self.with_bbox}, '
-        repr_str += f'{indent_str}with_label={self.with_label}, '
-        repr_str += f'{indent_str}with_mask={self.with_mask}, '
-        repr_str += f'{indent_str}with_seg={self.with_seg}, '
-        repr_str += f'{indent_str}poly2mask={self.poly2mask})'
+        indent_str = "    "
+        repr_str = self.__class__.__name__ + "(\n"
+        repr_str += f"{indent_str}with_bbox_3d={self.with_bbox_3d}, "
+        repr_str += f"{indent_str}with_label_3d={self.with_label_3d}, "
+        repr_str += f"{indent_str}with_mask_3d={self.with_mask_3d}, "
+        repr_str += f"{indent_str}with_seg_3d={self.with_seg_3d}, "
+        repr_str += f"{indent_str}with_bbox={self.with_bbox}, "
+        repr_str += f"{indent_str}with_label={self.with_label}, "
+        repr_str += f"{indent_str}with_mask={self.with_mask}, "
+        repr_str += f"{indent_str}with_seg={self.with_seg}, "
+        repr_str += f"{indent_str}poly2mask={self.poly2mask})"
         return repr_str
