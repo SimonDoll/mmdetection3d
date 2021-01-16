@@ -296,8 +296,6 @@ def obtain_sensor2top(
     """
     sd_rec = nusc.get("sample_data", sensor_token)
     cs_record = nusc.get("calibrated_sensor", sd_rec["calibrated_sensor_token"])
-    print(cs_record["camera_intrinsic"])
-    exit(0)
     pose_record = nusc.get("ego_pose", sd_rec["ego_pose_token"])
     data_path = str(nusc.get_sample_data_path(sd_rec["token"]))
     if os.getcwd() in data_path:  # path from lyftdataset is absolute path
@@ -341,25 +339,6 @@ def obtain_sensor2top(
         np.linalg.inv(global_lidar_T_ego) @ (global_sensor_T_ego @ ego_T_sensor)
     )
 
-    # l2e_r_s = sweep["sensor2ego_rotation"]
-    # l2e_t_s = sweep["sensor2ego_translation"]
-    # e2g_r_s = sweep["ego2global_rotation"]
-    # e2g_t_s = sweep["ego2global_translation"]
-
-    # # obtain the RT from sensor to Top LiDAR
-    # # sweep->ego->global->ego'->lidar
-    # l2e_r_s_mat = Quaternion(l2e_r_s).rotation_matrix
-    # e2g_r_s_mat = Quaternion(e2g_r_s).rotation_matrix
-    # R = (l2e_r_s_mat.T @ e2g_r_s_mat.T) @ (
-    #     np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T
-    # )
-    # T = (l2e_t_s @ e2g_r_s_mat.T + e2g_t_s) @ (
-    #     np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T
-    # )
-    # T -= (
-    #     e2g_t @ (np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T)
-    #     + l2e_t @ np.linalg.inv(l2e_r_mat).T
-    # )
     sweep["sensor2lidar_rotation"] = lidar_T_sensor[:3, :3]
     sweep["sensor2lidar_translation"] = lidar_T_sensor[:3, 3]
     return sweep

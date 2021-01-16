@@ -4,18 +4,20 @@ from matplotlib import pyplot as plt
 
 
 from mmdet.datasets import PIPELINES
+from mmdet3d.core.points import BasePoints, get_points_type
 
 
 @PIPELINES.register_module()
 class AugmentPointsWithImageFeats:
     """Adds image rgb features to a pointcloud"""
 
-    def __init__(self, filter_non_matched=True):
+    def __init__(self, filter_non_matched=True, coord_type="LIDAR"):
         """
         Args:
             filter_non_matched (bool) wether to remove points that do not lie in the images. Defaults to True
         """
         self._filter_non_matched = filter_non_matched
+        self._coord_type = coord_type
 
     def __call__(self, results):
 
@@ -23,45 +25,37 @@ class AugmentPointsWithImageFeats:
 
         # channels x h x w x cameras
         imgs = results["img"]
-        print("imgs =", imgs.shape)
         # cameras x h x w x channels
         reshaped = []
         for i in range(imgs.shape[-1]):
             img = imgs[:, :, :, i]
             reshaped.append(img)
         reshaped = np.asarray(reshaped)
-        print("reshaped =", reshaped.shape)
-        imgs = np.moveaxis(imgs, -1, 0)
         imgs = reshaped
 
         points = results["points"].tensor
 
-        points_4d = points[:, 0:4]
-
-        print("points shape =", points.shape)
         points_dim = results["points"].points_dim
+        # print("init dim =", points_dim)
 
-        for idx in range(len(lidar2imgs)):
-            img_mat = lidar2imgs[idx]
+        # marks points that have a valid color value
+        points_mask = torch.zeros((len(points),), dtype=torch.bool)
+
+        # only valid at points_mask
+        point_colors = torch.zeros((len(points), imgs.shape[-1]))
+        for img_idx in range(len(lidar2imgs)):
+            img_mat = lidar2imgs[img_idx]
 
             img_mat = torch.Tensor(img_mat)
 
-            img = imgs[idx]
-            # img mat is 4x4 projection to img plane
+            img = imgs[img_idx]
 
-            print("img mat =\n", np.asarray(img_mat))
+            for p_idx in range(len(points)):
+                point4d = torch.cat((points[p_idx][0:3], torch.tensor([1])))
 
-            print(points_4d.shape)
-
-            count = 0
-            xs = []
-            ys = []
-            zs = []
-            for p in points_4d:
-                point4d = torch.cat((p[0:3], torch.tensor([1])))
+                # project the point onto the image plane
                 point_projected = img_mat @ point4d
-                # print("proj =", point_projected)
-                # print("img mat =", img_mat)
+
                 x = point_projected[0]
                 y = point_projected[1]
                 z = point_projected[2]
@@ -72,73 +66,28 @@ class AugmentPointsWithImageFeats:
                     # skip close points
                     continue
 
-                # print(x, ",", y)
-                if x >= 0 and x < 1600 and y >= 0 and y < 900:
-                    xs.append(x.item())
-                    ys.append(y.item())
-                    zs.append(z.item())
-                    count += 1
-                    # hits[int(y), int(x)] = np.asarray([255, 255, 255])
-                    # img[int(y), int(x)] = np.asarray([255, 0, 0])
+                # only use points that lie inside this image
+                if x >= 0 and x < img.shape[1] and y >= 0 and y < img.shape[0]:
 
-            print("count =", count)
-            plt.imshow(img, zorder=1)
-            plt.scatter(xs, ys, zorder=2, s=0.4, c=zs)
+                    # grab the image color value (bgr or rgb)
+                    x = int(x)
+                    y = int(y)
+                    color = img[y][x]
 
-            plt.savefig("/workspace/work_dirs/plot" + str(idx) + ".png")
-            plt.clf()
+                    # mark this index as valid
+                    # TODO check if already set, should not happen? img overlap?
+                    points_mask[p_idx] = True
+                    point_colors[p_idx] = torch.from_numpy(color)
 
-        # raise ValueError("bla")
+        # augment the points with the img features
+        valid_point_colors = point_colors[points_mask]
+        valid_points = points[points_mask]
 
-        # exit(0)
-        # print("\n")
-        # print("scale factor =", results["scale_factor"])
-        # print("img_norm_cfg =", results["img_norm_cfg"])
-        # print("lidar2img", results["lidar2img"])
-        # print("img_fields", results["img_fields"])
-        # print("\n")
-        # raise ValueError("bla")
+        points = torch.cat((valid_points, valid_point_colors), dim=1)
+        points_class = get_points_type(self._coord_type)
+        # TODO attributes
+        points = points_class(points, points_dim=points.shape[-1], attribute_dims=None)
+        # print("new dim =", points.points_dim)
+        results["points"] = points
+
         return results
-
-
-# @PIPELINES.register_module()
-# class AugmentPointsWithImageFeats:
-#     """Adds image rgb features to a pointcloud"""
-
-#     def __init__(self, filter_non_matched=True, sweeps=10):
-#         """
-#         Args:
-#             filter_non_matched (bool) wether to remove points that do not lie in the images. Defaults to True
-#         """
-#         self._filter_non_matched = filter_non_matched
-#         self._sweeps_num = sweeps
-
-#     def __call__(self, results):
-#         print(results.keys())
-#         print("time =", results["timestamp"])
-#         print("sweeps =", results["sweeps"])
-#         # if len(results["sweeps"]) <= self._sweeps_num:
-#         #         choices = np.arange(len(results["sweeps"])-1)
-#         #     elif self.test_mode:
-#         #         choices = np.arange(self.sweeps_num-1)
-#         #     else:
-#         #         choices = np.random.choice(
-#         #             len(results["sweeps"]), self.sweeps_num-1, replace=False
-#         #         )
-#         #     # choices is list of idxs for sweeps with len sweeps_num -1
-#         #     # always add the current sweep:
-
-#         #     for idx in choices:
-#         #         sweep = results["sweeps"][idx]
-#         #         points_sweep = self._load_points(sweep["data_path"])
-#         #         points_sweep = np.copy(points_sweep).reshape(-1, self.load_dim)
-#         #         if self.remove_close:
-#         #             points_sweep = self._remove_close(points_sweep)
-#         #         sweep_ts = sweep["timestamp"] / 1e6
-#         #         points_sweep[:, :3] = (
-#         #             points_sweep[:, :3] @ sweep["sensor2lidar_rotation"].T
-#         #         )
-#         #         points_sweep[:, :3] += sweep["sensor2lidar_translation"]
-#         #         points_sweep[:, 4] = ts - sweep_ts
-#         #         points_sweep = points.new_point(points_sweep)
-#         #         sweep_points_list.append(points_sweep)

@@ -9,6 +9,17 @@ from pyquaternion import Quaternion
 from shapely.geometry import MultiPoint, box
 from typing import List, Tuple, Union
 
+
+from .nuscenes_converter import (
+    create_nuscenes_infos,
+    get_available_scenes,
+    _fill_trainval_infos,
+    obtain_sensor2top,
+    export_2d_annotation,
+    get_2d_boxes,
+    post_process_coords,
+    generate_record,
+)
 from mmdet3d.datasets import NuScenesDataset
 
 nus_categories = (
@@ -81,13 +92,9 @@ def create_nuscenes_infos(
         print(
             "train scene: {}, val scene: {}".format(len(train_scenes), len(val_scenes))
         )
-    # TODO change back
-
-    train_nusc_infos, val_nusc_infos = _fill_trainval_infos2(
+    train_nusc_infos, val_nusc_infos = _fill_trainval_infos(
         nusc, train_scenes, val_scenes, test, max_sweeps=max_sweeps
     )
-
-    exit(0)
 
     metadata = dict(version=version)
     if test:
@@ -152,7 +159,6 @@ def get_available_scenes(nusc):
 
 def _fill_trainval_infos(nusc, train_scenes, val_scenes, test=False, max_sweeps=10):
     """Generate the train/val infos from the raw data.
-
     Args:
         nusc (:obj:`NuScenes`): Dataset class in the nuScenes dataset.
         train_scenes (list[str]): Basic information of training scenes.
@@ -160,7 +166,6 @@ def _fill_trainval_infos(nusc, train_scenes, val_scenes, test=False, max_sweeps=
         test (bool): Whether use the test mode. In the test mode, no
             annotations can be accessed. Default: False.
         max_sweeps (int): Max number of sweeps. Default: 10.
-
     Returns:
         tuple[list[dict]]: Information of training set and validation set
             that will be saved to the info file.
@@ -169,211 +174,6 @@ def _fill_trainval_infos(nusc, train_scenes, val_scenes, test=False, max_sweeps=
     val_nusc_infos = []
 
     for sample in mmcv.track_iter_progress(nusc.sample):
-        lidar_token = sample["data"]["LIDAR_TOP"]
-        sd_rec = nusc.get("sample_data", sample["data"]["LIDAR_TOP"])
-        cs_record = nusc.get("calibrated_sensor", sd_rec["calibrated_sensor_token"])
-        pose_record = nusc.get("ego_pose", sd_rec["ego_pose_token"])
-        lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
-
-        mmcv.check_file_exist(lidar_path)
-
-        info = {
-            "lidar_path": lidar_path,
-            "token": sample["token"],
-            "sweeps": [],
-            "cams": dict(),
-            "lidar2ego_translation": cs_record["translation"],
-            "lidar2ego_rotation": cs_record["rotation"],
-            "ego2global_translation": pose_record["translation"],
-            "ego2global_rotation": pose_record["rotation"],
-            "timestamp": sample["timestamp"],
-        }
-
-        l2e_r = info["lidar2ego_rotation"]
-        l2e_t = info["lidar2ego_translation"]
-        e2g_r = info["ego2global_rotation"]
-        e2g_t = info["ego2global_translation"]
-        l2e_r_mat = Quaternion(l2e_r).rotation_matrix
-        e2g_r_mat = Quaternion(e2g_r).rotation_matrix
-
-        # obtain 6 image's information per frame
-        camera_types = [
-            "CAM_FRONT",
-            "CAM_FRONT_RIGHT",
-            "CAM_FRONT_LEFT",
-            "CAM_BACK",
-            "CAM_BACK_LEFT",
-            "CAM_BACK_RIGHT",
-        ]
-        for cam in camera_types:
-            cam_token = sample["data"][cam]
-            cam_path, _, cam_intrinsic = nusc.get_sample_data(cam_token)
-            cam_info = obtain_sensor2top(
-                nusc, cam_token, l2e_t, l2e_r_mat, e2g_t, e2g_r_mat, cam
-            )
-            cam_info.update(cam_intrinsic=cam_intrinsic)
-            info["cams"].update({cam: cam_info})
-
-        # obtain sweeps for a single key-frame
-        sd_rec = nusc.get("sample_data", sample["data"]["LIDAR_TOP"])
-        sweeps = []
-        while len(sweeps) < max_sweeps:
-            if not sd_rec["prev"] == "":
-                sweep = obtain_sensor2top(
-                    nusc, sd_rec["prev"], l2e_t, l2e_r_mat, e2g_t, e2g_r_mat, "lidar"
-                )
-                sweeps.append(sweep)
-                sd_rec = nusc.get("sample_data", sd_rec["prev"])
-            else:
-                break
-        info["sweeps"] = sweeps
-        # obtain annotation
-        if not test:
-            annotations = [
-                nusc.get("sample_annotation", token) for token in sample["anns"]
-            ]
-            locs = np.array([b.center for b in boxes]).reshape(-1, 3)
-            dims = np.array([b.wlh for b in boxes]).reshape(-1, 3)
-            rots = np.array([b.orientation.yaw_pitch_roll[0] for b in boxes]).reshape(
-                -1, 1
-            )
-            velocity = np.array(
-                [nusc.box_velocity(token)[:2] for token in sample["anns"]]
-            )
-            valid_flag = np.array(
-                [
-                    (anno["num_lidar_pts"] + anno["num_radar_pts"]) > 0
-                    for anno in annotations
-                ],
-                dtype=bool,
-            ).reshape(-1)
-            # convert velo from global to lidar
-            for i in range(len(boxes)):
-                velo = np.array([*velocity[i], 0.0])
-                velo = velo @ np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T
-                velocity[i] = velo[:2]
-
-            names = [b.name for b in boxes]
-            for i in range(len(names)):
-                if names[i] in NuScenesDataset.NameMapping:
-                    names[i] = NuScenesDataset.NameMapping[names[i]]
-            names = np.array(names)
-            # we need to convert rot to SECOND format.
-            gt_boxes = np.concatenate([locs, dims, -rots - np.pi / 2], axis=1)
-            assert len(gt_boxes) == len(
-                annotations
-            ), f"{len(gt_boxes)}, {len(annotations)}"
-            info["gt_boxes"] = gt_boxes
-            info["gt_names"] = names
-            info["gt_velocity"] = velocity.reshape(-1, 2)
-            info["num_lidar_pts"] = np.array([a["num_lidar_pts"] for a in annotations])
-            info["num_radar_pts"] = np.array([a["num_radar_pts"] for a in annotations])
-            info["valid_flag"] = valid_flag
-
-        if sample["scene_token"] in train_scenes:
-            train_nusc_infos.append(info)
-        else:
-            val_nusc_infos.append(info)
-
-    return train_nusc_infos, val_nusc_infos
-
-
-def _collect_sample_data_infos(sample, nusc, max_sweeps):
-    # for each sample we need the previous x samples that we want to collect data about as well
-    # collect the samples (current sample is counted -> sample + max_sweeps -1)
-    sample_list = [sample]
-    most_recent_sample_token = sample["token"]
-    current_sample_token = sample["token"]
-    for _ in range(max_sweeps - 1):
-        current_sample = nusc.get("sample", current_sample_token)
-        # check if there is a sample
-        if current_sample["prev"]:
-            # get the prev sample
-            current_sample_token = current_sample["prev"]
-            sample_list.append(nusc.get("sample", current_sample_token))
-        else:
-            # no further previous samples
-            break
-
-    # sample list is the list of the last x frames (including current)
-    # sample list[0] = current ... sample_list[-1] = oldest
-    # sample_infos follows the same convention
-    sample_infos = []
-    for sample in sample_list:
-        lidar_token = sample["data"]["LIDAR_TOP"]
-        sd_rec = nusc.get("sample_data", sample["data"]["LIDAR_TOP"])
-        cs_record = nusc.get("calibrated_sensor", sd_rec["calibrated_sensor_token"])
-        pose_record = nusc.get("ego_pose", sd_rec["ego_pose_token"])
-        lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
-
-        mmcv.check_file_exist(lidar_path)
-
-        info = {
-            "lidar_path": lidar_path,
-            "token": sample["token"],
-            "cams": dict(),
-            "lidar2ego_translation": cs_record["translation"],
-            "lidar2ego_rotation": cs_record["rotation"],
-            "ego2global_translation": pose_record["translation"],
-            "ego2global_rotation": pose_record["rotation"],
-            "timestamp": sample["timestamp"],
-        }
-
-        l2e_r = info["lidar2ego_rotation"]
-        l2e_t = info["lidar2ego_translation"]
-        e2g_r = info["ego2global_rotation"]
-        e2g_t = info["ego2global_translation"]
-        l2e_r_mat = Quaternion(l2e_r).rotation_matrix
-        e2g_r_mat = Quaternion(e2g_r).rotation_matrix
-
-        # obtain 6 image's information per frame
-        camera_types = [
-            "CAM_FRONT",
-            "CAM_FRONT_RIGHT",
-            "CAM_FRONT_LEFT",
-            "CAM_BACK",
-            "CAM_BACK_LEFT",
-            "CAM_BACK_RIGHT",
-        ]
-        for cam in camera_types:
-            cam_token = sample["data"][cam]
-            cam_path, _, cam_intrinsic = nusc.get_sample_data(cam_token)
-            print("cam =", cam)
-            print("path =", cam_path)
-            cam_info = obtain_sensor2top(
-                nusc, cam_token, l2e_t, l2e_r_mat, e2g_t, e2g_r_mat, cam
-            )
-            cam_info.update(cam_intrinsic=cam_intrinsic)
-            info["cams"].update({cam: cam_info})
-
-        sample_infos.append(info)
-    return sample_infos
-
-
-def _fill_trainval_infos2(nusc, train_scenes, val_scenes, test=False, max_sweeps=10):
-    """Generate the train/val infos from the raw data.
-
-    Args:
-        nusc (:obj:`NuScenes`): Dataset class in the nuScenes dataset.
-        train_scenes (list[str]): Basic information of training scenes.
-        val_scenes (list[str]): Basic information of validation scenes.
-        test (bool): Whether use the test mode. In the test mode, no
-            annotations can be accessed. Default: False.
-        max_sweeps (int): Max number of sweeps. Default: 10.
-
-    Returns:
-        tuple[list[dict]]: Information of training set and validation set
-            that will be saved to the info file.
-    """
-    train_nusc_infos = []
-    val_nusc_infos = []
-
-    count = 0
-    for sample in mmcv.track_iter_progress(nusc.sample):
-        count += 1
-        if count >= 15:
-            exit(0)
-
         sample_infos = _collect_sample_data_infos(sample, nusc, max_sweeps)
         current_frame_info = sample_infos[0]
         prev_frames_infos = sample_infos[1:]
@@ -442,10 +242,6 @@ def _fill_trainval_infos2(nusc, train_scenes, val_scenes, test=False, max_sweeps
             current_frame_info["valid_flag"] = valid_flag
 
         current_frame_info["prev"] = prev_frames_infos
-        print("\n final keys =", current_frame_info.keys())
-        print("prev =", len(current_frame_info["prev"]))
-        if len(current_frame_info["prev"]) > 0:
-            print("keys =", current_frame_info["prev"][0].keys())
 
         if sample["scene_token"] in train_scenes:
             train_nusc_infos.append(current_frame_info)
@@ -453,6 +249,76 @@ def _fill_trainval_infos2(nusc, train_scenes, val_scenes, test=False, max_sweeps
             val_nusc_infos.append(current_frame_info)
 
     return train_nusc_infos, val_nusc_infos
+
+
+def _collect_sample_data_infos(sample, nusc, max_sweeps):
+    # for each sample we need the previous x samples that we want to collect data about as well
+    # collect the samples (current sample is counted -> sample + max_sweeps -1)
+    sample_list = [sample]
+    most_recent_sample_token = sample["token"]
+    current_sample_token = sample["token"]
+    for _ in range(max_sweeps - 1):
+        current_sample = nusc.get("sample", current_sample_token)
+        # check if there is a sample
+        if current_sample["prev"]:
+            # get the prev sample
+            current_sample_token = current_sample["prev"]
+            sample_list.append(nusc.get("sample", current_sample_token))
+        else:
+            # no further previous samples
+            break
+
+    # sample list is the list of the last x frames (including current)
+    # sample list[0] = current ... sample_list[-1] = oldest
+    # sample_infos follows the same convention
+    sample_infos = []
+    for sample in sample_list:
+        lidar_token = sample["data"]["LIDAR_TOP"]
+        sd_rec = nusc.get("sample_data", sample["data"]["LIDAR_TOP"])
+        cs_record = nusc.get("calibrated_sensor", sd_rec["calibrated_sensor_token"])
+        pose_record = nusc.get("ego_pose", sd_rec["ego_pose_token"])
+        lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
+
+        mmcv.check_file_exist(lidar_path)
+
+        info = {
+            "lidar_path": lidar_path,
+            "token": sample["token"],
+            "cams": dict(),
+            "lidar2ego_translation": cs_record["translation"],
+            "lidar2ego_rotation": cs_record["rotation"],
+            "ego2global_translation": pose_record["translation"],
+            "ego2global_rotation": pose_record["rotation"],
+            "timestamp": sample["timestamp"],
+        }
+
+        l2e_r = info["lidar2ego_rotation"]
+        l2e_t = info["lidar2ego_translation"]
+        e2g_r = info["ego2global_rotation"]
+        e2g_t = info["ego2global_translation"]
+        l2e_r_mat = Quaternion(l2e_r).rotation_matrix
+        e2g_r_mat = Quaternion(e2g_r).rotation_matrix
+
+        # obtain 6 image's information per frame
+        camera_types = [
+            "CAM_FRONT",
+            "CAM_FRONT_RIGHT",
+            "CAM_FRONT_LEFT",
+            "CAM_BACK",
+            "CAM_BACK_LEFT",
+            "CAM_BACK_RIGHT",
+        ]
+        for cam in camera_types:
+            cam_token = sample["data"][cam]
+            cam_path, _, cam_intrinsic = nusc.get_sample_data(cam_token)
+            cam_info = obtain_sensor2top(
+                nusc, cam_token, l2e_t, l2e_r_mat, e2g_t, e2g_r_mat, cam
+            )
+            cam_info.update(cam_intrinsic=cam_intrinsic)
+            info["cams"].update({cam: cam_info})
+
+        sample_infos.append(info)
+    return sample_infos
 
 
 def obtain_sensor2top(
@@ -491,27 +357,37 @@ def obtain_sensor2top(
         "ego2global_rotation": pose_record["rotation"],
         "timestamp": sd_rec["timestamp"],
     }
-    l2e_r_s = sweep["sensor2ego_rotation"]
-    l2e_t_s = sweep["sensor2ego_translation"]
-    e2g_r_s = sweep["ego2global_rotation"]
-    e2g_t_s = sweep["ego2global_translation"]
 
-    # obtain the RT from sensor to Top LiDAR
-    # sweep->ego->global->ego'->lidar
-    l2e_r_s_mat = Quaternion(l2e_r_s).rotation_matrix
-    e2g_r_s_mat = Quaternion(e2g_r_s).rotation_matrix
-    R = (l2e_r_s_mat.T @ e2g_r_s_mat.T) @ (
-        np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T
+    # timestamp of sensor_type
+    # {global,t_sensor}_T_sensor
+    ego_T_sensor = np.eye(4)
+    ego_T_sensor[:3, :3] = Quaternion(cs_record["rotation"]).rotation_matrix
+    ego_T_sensor[:3, 3] = cs_record["translation"]
+
+    global_sensor_T_ego = np.eye(4)
+    global_sensor_T_ego[:3, :3] = Quaternion(pose_record["rotation"]).rotation_matrix
+    global_sensor_T_ego[:3, 3] = pose_record["translation"]
+
+    # global_T_sensor = global_sensor_T_ego @ ego_T_sensor
+
+    # lidar is currently reference
+    # transformation at lidar time
+    ego_T_lidar = np.eye(4)
+    ego_T_lidar[:3, :3] = l2e_r_mat
+    ego_T_lidar[:3, 3] = l2e_t
+
+    global_lidar_T_ego = np.eye(4)
+    global_lidar_T_ego[:3, :3] = e2g_r_mat
+    global_lidar_T_ego[:3, 3] = e2g_t
+
+    # lidar_T_camera with correction using global frame discrepancy
+    # lidar_T_sensor = lidar_T_ego . ego_T_global . global_T_ego . ego_T_sensor
+    lidar_T_sensor = np.linalg.inv(ego_T_lidar) @ (
+        np.linalg.inv(global_lidar_T_ego) @ (global_sensor_T_ego @ ego_T_sensor)
     )
-    T = (l2e_t_s @ e2g_r_s_mat.T + e2g_t_s) @ (
-        np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T
-    )
-    T -= (
-        e2g_t @ (np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T)
-        + l2e_t @ np.linalg.inv(l2e_r_mat).T
-    )
-    sweep["sensor2lidar_rotation"] = R.T  # points @ R.T + T
-    sweep["sensor2lidar_translation"] = T
+
+    sweep["sensor2lidar_rotation"] = lidar_T_sensor[:3, :3]
+    sweep["sensor2lidar_translation"] = lidar_T_sensor[:3, 3]
     return sweep
 
 
