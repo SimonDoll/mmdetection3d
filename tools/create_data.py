@@ -72,7 +72,7 @@ def nuscenes_data_prep(
 
 
 def extended_nuscenes_data_prep(
-    root_path, info_prefix, version, dataset_name, out_dir, max_sweeps=10
+    root_path, info_prefix, version, dataset_name, out_dir, max_prev_samples=10
 ):
     """Prepare data related to own nuScenes dataset with different api.
 
@@ -85,10 +85,10 @@ def extended_nuscenes_data_prep(
         version (str): Dataset version.
         dataset_name (str): The dataset class name.
         out_dir (str): Output directory of the groundtruth database info.
-        max_sweeps (int): Number of input consecutive frames. Default: 10
+        max_prev_samples (int): Number of input consecutive frames. Default: 10
     """
     extended_nuscenes_converter.create_nuscenes_infos(
-        root_path, info_prefix, version=version, max_sweeps=max_sweeps
+        root_path, info_prefix, version=version, max_prev_samples=max_prev_samples
     )
 
     if version == "v1.0-test":
@@ -266,15 +266,34 @@ if __name__ == "__main__":
             out_dir=args.out_dir,
             max_sweeps=args.max_sweeps,
         )
-    elif args.dataset == "nuscenes" and args.version == "v1.0-mini":
-        train_version = f"{args.version}"
-        nuscenes_data_prep(
+    elif args.dataset == "nuscenes" and args.version != "v1.0-mini":
+        train_version = f"{args.version}-trainval"
+        extended_nuscenes_data_prep(
             root_path=args.root_path,
             info_prefix=args.extra_tag,
             version=train_version,
-            dataset_name="NuScenesDataset",
+            dataset_name="ExtendedNuScenesDataset",
             out_dir=args.out_dir,
-            max_sweeps=args.max_sweeps,
+            max_prev_samples=args.max_sweeps,
+        )
+        test_version = f"{args.version}-test"
+        extended_nuscenes_data_prep(
+            root_path=args.root_path,
+            info_prefix=args.extra_tag,
+            version=test_version,
+            dataset_name="ExtendedNuScenesDataset",
+            out_dir=args.out_dir,
+            max_prev_samples=args.max_sweeps,
+        )
+    elif args.dataset == "nuscenes" and args.version == "v1.0-mini":
+        train_version = f"{args.version}"
+        extended_nuscenes_data_prep(
+            root_path=args.root_path,
+            info_prefix=args.extra_tag,
+            version=train_version,
+            dataset_name="ExtendedNuScenesDataset",
+            out_dir=args.out_dir,
+            max_prev_samples=args.max_sweeps,
         )
     elif args.dataset == "lyft":
         train_version = f"{args.version}-train"
