@@ -170,32 +170,42 @@ class LoadPointsFromMultiSweeps(object):
         points.tensor[:, 4] = 0
         sweep_points_list = [points]
         ts = results["timestamp"]
-        if self.pad_empty_sweeps and len(results["sweeps"]) == 0:
+
+        # case if only the current frame has a sweep (no previous frames)
+        previous_count = len(results["prev"])
+        if self.pad_empty_sweeps and previous_count == 0:
             for i in range(self.sweeps_num):
                 if self.remove_close:
                     sweep_points_list.append(self._remove_close(points))
                 else:
                     sweep_points_list.append(points)
         else:
-            if len(results["sweeps"]) <= self.sweeps_num:
-                choices = np.arange(len(results["sweeps"]))
+            # previous sweeps  exist
+            if previous_count <= self.sweeps_num:
+                # pick the last x sweeps
+                choices = np.arange(previous_count)
             elif self.test_mode:
+                # pick the last x sweeps
                 choices = np.arange(self.sweeps_num)
             else:
+                # randomly select sweeps
                 choices = np.random.choice(
                     len(results["sweeps"]), self.sweeps_num, replace=False
                 )
             for idx in choices:
-                sweep = results["sweeps"][idx]
-                points_sweep = self._load_points(sweep["data_path"])
+                prev = results["prev"][idx]
+                points_sweep = self._load_points(prev["pts_filename"])
                 points_sweep = np.copy(points_sweep).reshape(-1, self.load_dim)
                 if self.remove_close:
                     points_sweep = self._remove_close(points_sweep)
-                sweep_ts = sweep["timestamp"] / 1e6
+
+                sweep_ts = prev["timestamp"]
+
+                # transform the sweep (ego compensation)
                 points_sweep[:, :3] = (
-                    points_sweep[:, :3] @ sweep["sensor2lidar_rotation"].T
+                    points_sweep[:, :3] @ prev["lidar_current_R_lidar_prev"]
                 )
-                points_sweep[:, :3] += sweep["sensor2lidar_translation"]
+                points_sweep[:, :3] += prev["lidar_current_t_lidar_prev"]
                 points_sweep[:, 4] = ts - sweep_ts
                 points_sweep = points.new_point(points_sweep)
                 sweep_points_list.append(points_sweep)

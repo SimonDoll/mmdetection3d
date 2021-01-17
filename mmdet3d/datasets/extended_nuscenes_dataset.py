@@ -252,12 +252,19 @@ class ExtendedNuScenesDataset(Custom3DDataset):
                 - ann_info (dict): Annotation info.
         """
         info = self.data_infos[index]
-
         # process the prev frames first
         prev_input_dicts = []
         for i in range(len(info["prev"])):
             prev = info["prev"][i]
             prev_input_dict = self.info_to_input_dict(prev)
+            # add the tfs current_T_prev
+            prev_input_dict["lidar_current_t_lidar_prev"] = prev[
+                "lidar_current_t_lidar_prev"
+            ]
+            prev_input_dict["lidar_current_R_lidar_prev"] = prev[
+                "lidar_current_R_lidar_prev"
+            ]
+
             prev_input_dicts.append(prev_input_dict)
 
         # now the current frame
@@ -271,9 +278,6 @@ class ExtendedNuScenesDataset(Custom3DDataset):
             annos = self.get_ann_info(index)
             input_dict["ann_info"] = annos
 
-        print("input =", input_dict["prev"])
-        print("keys =", input_dict.keys())
-        # exit(0)
         return input_dict
 
     def get_ann_info(self, index):
