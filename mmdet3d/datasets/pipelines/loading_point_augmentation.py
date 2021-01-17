@@ -121,13 +121,13 @@ class AugmentPointsWithImageFeatures:
             img_row_idxs = projected_points[:, 0].long()
             img_col_idxs = projected_points[:, 1].long()
 
-            self._debug_visualize(
-                img,
-                projected_points[:, 0].long(),
-                projected_points[:, 1].long(),
-                projected_points[:, 2],
-                img_idx,
-            )
+            # self._debug_visualize(
+            #     img,
+            #     projected_points[:, 0].long(),
+            #     projected_points[:, 1].long(),
+            #     projected_points[:, 2],
+            #     img_idx,
+            # )
 
             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
@@ -172,6 +172,8 @@ class AugmentPrevPointsWithImageFeatures:
         filter_non_matched=True,
         coord_type="LIDAR",
         max_sweeps=10,
+        filter_close=1.0,
+        use_dim=[0, 1, 2, 3],
     ):
         """
         Args:
@@ -181,22 +183,38 @@ class AugmentPrevPointsWithImageFeatures:
         self._coord_type = coord_type
         self._max_sweeps = max_sweeps
 
+        if isinstance(use_dim, int):
+            use_dim = list(range(use_dim))
+        self._use_dim = use_dim
+
+        if filter_close:
+            assert filter_close >= 0.0
+        self._filter_close = filter_close
+
     def __call__(self, results):
-        # augment the current frame
+        prev_list = results["prev"]
+        for i in range(min(len(prev_list), self._max_sweeps)):
+            # augment all prev frames
+            prev = prev_list[i]
+            projected_points = self._add_img_features_to_cloud(
+                prev["points"], prev["img_T_lidar"], prev["img"]
+            )
+            prev["points"] = projected_points
 
-        current_pointcloud = results["points"]
-        print(results.keys())
-        exit()
-
-        # augment all prev frames
-        pass
+            results["prev"] = prev
+        return results
 
     def _add_img_features_to_cloud(self, point_cloud, img_T_lidar_list, imgs):
 
         points = point_cloud.tensor
         device = points.device
-
-        img_T_lidar_tensors = torch.tensor(img_T_lidar_list).to(device).float()
+        lidar2imgs = (
+            torch.tensor(
+                img_T_lidar_list,
+            )
+            .to(device)
+            .float()
+        )
 
         # TODO do in torch
         # move the img dimension to front
@@ -210,6 +228,7 @@ class AugmentPrevPointsWithImageFeatures:
 
         # get x y z only
         points = points[:, 0:3]
+
         # bring the points to homogenous coords
         points = torch.cat((points, torch.ones((len(points), 1))), dim=1)
 
@@ -220,33 +239,31 @@ class AugmentPrevPointsWithImageFeatures:
         # n x color channels
         points_colors = torch.zeros((len(points), imgs.shape[-1]), dtype=imgs.dtype)
 
-        # only valid at colored_points_mask
-        point_colors = torch.zeros((len(points), imgs.shape[-1]))
-
         # make points a row vector n x 4 x 1
         # (enables us to use batch matrix multiplication)
-        points = torch.unsqueeze(points, dim=2)
+        # points = torch.unsqueeze(points, dim=2)
 
-        for img_idx in range(len(img_T_lidar_tensors)):
-            img_T_lidar = img_T_lidar_tensors[img_idx]
+        for img_idx in range(len(lidar2imgs)):
+            img_mat = lidar2imgs[img_idx]
             img = imgs[img_idx]
 
             # transform all points on the img plane of the currently selected img
-            # expand the img mat to n x 4 x 4
-            img_T_lidar = img_T_lidar.expand(
-                (len(points), img_T_lidar.shape[0], img_T_lidar.shape[1])
-            )
 
-            # TODO maybe switch to (AB)^T = B^T @ A^T pattern
-            # batch matrix mul n x 4 x 4 @ n x 4 x 1 -> n x 4 x 1
-            projected_points = torch.bmm(img_T_lidar, points)
-
-            # make points a column vector -> n x 4
-            projected_points = torch.squeeze(projected_points, dim=2)
+            # use the theorem:
+            # if points would have been 4 x 1 (single point)
+            # (Img_mat . Points)^T = Points^T . Img_mat^T
+            # (4 x 4 . 4 x 1)^T = (1 x 4) . (4 x 4) -> 1 x 4
+            # this can be generalized for n points
+            # points is n x 4 already (no need to transpose)
+            projected_points = points @ img_mat.T
 
             # normalize the projected coordinates
-            projected_points[0] /= projected_points[2]
-            projected_points[1] /= projected_points[2]
+            depth = projected_points[:, 2]
+            # add an epsilon to prevent division by zero
+            depth[depth == 0.0] = torch.finfo(torch.float32).eps
+
+            projected_points[:, 0] = torch.div(projected_points[:, 0], depth)
+            projected_points[:, 1] = torch.div(projected_points[:, 1], depth)
 
             # create a mask of valid points
             # valid means that the points lie inside the image x y borders, z is not filtered here
@@ -257,13 +274,27 @@ class AugmentPrevPointsWithImageFeatures:
                 projected_points[:, 1] > 0, projected_points[:, 1] < img.shape[1]
             )
 
-            valid_points_mask = torch.logical_and(mask_x, mask_y)
+            if self._filter_close:
+                valid_points_mask = torch.logical_and(mask_x, mask_y)
+                mask_z = projected_points[:, 2] > self._filter_close
+                valid_points_mask = torch.logical_and(valid_points_mask, mask_z)
+
+            else:
+                valid_points_mask = torch.logical_and(mask_x, mask_y)
 
             # use only the points inside the image
             projected_points = projected_points[valid_points_mask]
             # get x y as pixel indices
             img_row_idxs = projected_points[:, 0].long()
             img_col_idxs = projected_points[:, 1].long()
+
+            # self._debug_visualize(
+            #     img,
+            #     projected_points[:, 0].long(),
+            #     projected_points[:, 1].long(),
+            #     projected_points[:, 2],
+            #     img_idx,
+            # )
 
             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
@@ -272,14 +303,29 @@ class AugmentPrevPointsWithImageFeatures:
             colored_points_mask[valid_points_mask] = True
 
         # augment the points with the colors
-        valid_point_colors = point_colors[colored_points_mask]
+        valid_point_colors = points_colors[colored_points_mask]
         valid_points = point_cloud.tensor[colored_points_mask]
+        valid_points = valid_points[:, self._use_dim]
 
         points = torch.cat((valid_points, valid_point_colors), dim=1)
         points_class = get_points_type(self._coord_type)
         # TODO attributes
-        points = points_class(points, points_dim=points.shape[-1], attribute_dims=None)
-        # print("new dim =", points.points_dim)
-        point_cloud = points
+        point_cloud = points_class(
+            points, points_dim=points.shape[-1], attribute_dims=None
+        )
 
         return point_cloud
+
+    def _debug_visualize(self, img, xs, ys, zs, idx):
+        xs = xs.cpu().detach().numpy()
+        ys = ys.cpu().detach().numpy()
+        zs = zs.cpu().detach().numpy()
+
+        img = img.cpu().detach().numpy()
+        img = np.swapaxes(img, 0, 1)
+
+        plt.imshow(img, zorder=1)
+        plt.scatter(xs, ys, zorder=2, s=0.4, c=zs)
+
+        plt.savefig("/workspace/work_dirs/plot" + str(idx) + ".png")
+        plt.clf()
