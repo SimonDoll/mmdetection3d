@@ -181,12 +181,10 @@ def _fill_trainval_infos(
             pose_record = nusc.get("ego_pose", sd_rec["ego_pose_token"])
             lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
 
-            l2e_r = current_frame_info["lidar2ego_rotation"]
-            l2e_t = current_frame_info["lidar2ego_translation"]
-            e2g_r = current_frame_info["ego2global_rotation"]
-            e2g_t = current_frame_info["ego2global_translation"]
-            l2e_r_mat = Quaternion(l2e_r).rotation_matrix
-            e2g_r_mat = Quaternion(e2g_r).rotation_matrix
+            ego_R_lidar = current_frame_info["ego_R_lidar"]
+            ego_t_lidar = current_frame_info["ego_t_lidar"]
+            global_R_ego = current_frame_info["global_R_ego"]
+            global_t_ego = current_frame_info["global_t_ego"]
 
             annotations = [
                 nusc.get("sample_annotation", token) for token in sample["anns"]
@@ -207,9 +205,14 @@ def _fill_trainval_infos(
                 dtype=bool,
             ).reshape(-1)
             # convert velo from global to lidar
+            # TODO critical!!! i think those transforms are wrong!
+            # why arent the translations used? why inv.T?
+
             for i in range(len(boxes)):
                 velo = np.array([*velocity[i], 0.0])
-                velo = velo @ np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T
+                velo = (
+                    velo @ np.linalg.inv(global_R_ego).T @ np.linalg.inv(ego_R_lidar).T
+                )
                 velocity[i] = velo[:2]
 
             names = [b.name for b in boxes]
@@ -257,7 +260,6 @@ def _collect_sample_data_infos(sample, nusc, max_prev_samples):
     # for each sample we need the previous x samples that we want to collect data about as well
     # collect the samples (current sample is counted -> sample + max_prev_samples -1)
     sample_list = [sample]
-    most_recent_sample_token = sample["token"]
     current_sample_token = sample["token"]
     for _ in range(max_prev_samples - 1):
         current_sample = nusc.get("sample", current_sample_token)
@@ -283,23 +285,22 @@ def _collect_sample_data_infos(sample, nusc, max_prev_samples):
 
         mmcv.check_file_exist(lidar_path)
 
+        ego_t_lidar = cs_record["translation"]
+        ego_R_lidar = Quaternion(cs_record["rotation"]).rotation_matrix
+
+        global_t_ego = pose_record["translation"]
+        global_R_ego = Quaternion(pose_record["rotation"]).rotation_matrix
+
         info = {
             "lidar_path": lidar_path,
             "token": sample["token"],
             "cams": dict(),
-            "lidar2ego_translation": cs_record["translation"],
-            "lidar2ego_rotation": cs_record["rotation"],
-            "ego2global_translation": pose_record["translation"],
-            "ego2global_rotation": pose_record["rotation"],
+            "ego_t_lidar": ego_t_lidar,
+            "ego_R_lidar": ego_R_lidar,
+            "global_t_ego": global_t_ego,
+            "global_R_ego": global_R_ego,
             "timestamp": sample["timestamp"],
         }
-
-        l2e_r = info["lidar2ego_rotation"]
-        l2e_t = info["lidar2ego_translation"]
-        e2g_r = info["ego2global_rotation"]
-        e2g_t = info["ego2global_translation"]
-        l2e_r_mat = Quaternion(l2e_r).rotation_matrix
-        e2g_r_mat = Quaternion(e2g_r).rotation_matrix
 
         # obtain 6 image's information per frame
         camera_types = [
@@ -314,7 +315,13 @@ def _collect_sample_data_infos(sample, nusc, max_prev_samples):
             cam_token = sample["data"][cam]
             _, _, cam_intrinsic = nusc.get_sample_data(cam_token)
             cam_info = transform_sensor_to_lidar_top(
-                nusc, cam_token, l2e_t, l2e_r_mat, e2g_t, e2g_r_mat, cam
+                nusc,
+                cam_token,
+                ego_t_lidar,
+                ego_R_lidar,
+                global_t_ego,
+                global_R_ego,
+                cam,
             )
             cam_info.update(cam_intrinsic=cam_intrinsic)
             info["cams"].update({cam: cam_info})
@@ -338,11 +345,11 @@ def transform_sensor_to_lidar_top(
         nusc (class): Dataset class in the nuScenes dataset.
         sensor_token (str): Sample data token corresponding to the
             specific sensor type.
-        ego_t_lidar (np.ndarray): Translation from lidar to ego in shape (1, 3).
-        ego_R_lidar (np.ndarray): Rotation matrix from lidar to ego
+        ego_t_lidar (np.ndarray): Translation from lidar to ego in shape (1, 3) (at time of lidar)
+        ego_R_lidar (np.ndarray): Rotation matrix from lidar to ego (at time of lidar).
             in shape (3, 3).
-        global_t_ego (np.ndarray): Translation from ego to global in shape (1, 3).
-        global_R_ego (np.ndarray): Rotation matrix from ego to global
+        global_t_ego (np.ndarray): Translation from ego to global in shape (1, 3) (at time of lidar).
+        global_R_ego (np.ndarray): Rotation matrix from ego to global (at time of lidar).
             in shape (3, 3).
         sensor_type (str): Sensor to calibrate. Default: 'lidar'.
 
@@ -355,14 +362,22 @@ def transform_sensor_to_lidar_top(
     data_path = str(nusc.get_sample_data_path(sd_rec["token"]))
     if os.getcwd() in data_path:  # path from lyftdataset is absolute path
         data_path = data_path.split(f"{os.getcwd()}/")[-1]  # relative path
+
+    # theese transforms are at time of sensor e.g. camera
+    ego_sensor_t_sensor = cs_record["translation"]
+    ego_sensor_R_sensor = Quaternion(cs_record["rotation"]).rotation_matrix
+
+    global_sensor_t_ego = pose_record["translation"]
+    global_sensor_R_ego = Quaternion(pose_record["rotation"]).rotation_matrix
+
     sensor_data_transformed = {
         "data_path": data_path,
         "type": sensor_type,
         "sample_data_token": sd_rec["token"],
-        "sensor2ego_translation": cs_record["translation"],
-        "sensor2ego_rotation": cs_record["rotation"],
-        "ego2global_translation": pose_record["translation"],
-        "ego2global_rotation": pose_record["rotation"],
+        "ego_t_sensor": ego_sensor_t_sensor,
+        "ego_R_sensor": ego_sensor_R_sensor,
+        "ego2global_translation": global_sensor_t_ego,
+        "ego2global_rotation": global_sensor_R_ego,
         "timestamp": sd_rec["timestamp"],
     }
 

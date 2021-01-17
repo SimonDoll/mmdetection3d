@@ -192,6 +192,46 @@ class ExtendedNuScenesDataset(Custom3DDataset):
         self.version = self.metadata["version"]
         return data_infos
 
+    def info_to_input_dict(self, info):
+        # get all info from an info dict and convert its relevant keys to the input dict
+        input_dict = dict(
+            sample_idx=info["token"],
+            pts_filename=info["lidar_path"],
+            timestamp=info["timestamp"] / 1e6,
+        )
+
+        if self.modality["use_camera"]:
+            image_paths = []
+            img_T_lidar_list = []
+            for _, cam_info in info["cams"].items():
+
+                image_paths.append(cam_info["data_path"])
+                # obtain lidar to image transformation matrix
+                lidar_T_cam = np.eye(4)
+                lidar_T_cam[:3, :3] = cam_info["lidar_R_sensor"]
+                lidar_T_cam[:3, 3] = cam_info["lidar_t_sensor"]
+
+                # invert to gain the lidar to cam transformation
+                cam_T_lidar = np.linalg.inv(lidar_T_cam)
+
+                # camera intrinsics and projection matrix
+                intrinsic = cam_info["cam_intrinsic"]
+                K = np.eye(4)
+                K[: intrinsic.shape[0], : intrinsic.shape[1]] = intrinsic
+
+                img_T_lidar = K @ cam_T_lidar
+                # imgs are undistorted normally you would use the pin hole camera model here ...
+
+                img_T_lidar_list.append(img_T_lidar)
+
+            input_dict.update(
+                dict(
+                    img_filename=image_paths,
+                    img_T_lidar=img_T_lidar_list,
+                )
+            )
+        return input_dict
+
     def get_data_info(self, index):
         """Get data info according to the given index.
 
@@ -212,54 +252,28 @@ class ExtendedNuScenesDataset(Custom3DDataset):
                 - ann_info (dict): Annotation info.
         """
         info = self.data_infos[index]
-        print("info =", info)
-        # standard protocal modified from SECOND.Pytorch
-        input_dict = dict(
-            sample_idx=info["token"],
-            pts_filename=info["lidar_path"],
-            sweeps=info["sweeps"],
-            timestamp=info["timestamp"] / 1e6,
-        )
 
-        # x' = T . x
-        # x'^t = x^T . T
+        # process the prev frames first
+        prev_input_dicts = []
+        for i in range(len(info["prev"])):
+            prev = info["prev"][i]
+            prev_input_dict = self.info_to_input_dict(prev)
+            prev_input_dicts.append(prev_input_dict)
 
-        if self.modality["use_camera"]:
-            image_paths = []
-            lidar2img_rts = []
-            count = 0
-            for cam_type, cam_info in info["cams"].items():
+        # now the current frame
+        input_dict = self.info_to_input_dict(info)
 
-                image_paths.append(cam_info["data_path"])
-                # obtain lidar to image transformation matrix
-                lidar_T_cam = np.eye(4)
-                lidar_T_cam[:3, :3] = cam_info["sensor2lidar_rotation"]
-                lidar_T_cam[:3, 3] = cam_info["sensor2lidar_translation"]
+        # add the prev infos
+        input_dict["prev"] = prev_input_dicts
 
-                # invert to gain the lidar to cam transformation
-                cam_T_lidar = np.linalg.inv(lidar_T_cam)
-
-                # camera intrinsics and projection matrix
-                intrinsic = cam_info["cam_intrinsic"]
-                K = np.eye(4)
-                K[: intrinsic.shape[0], : intrinsic.shape[1]] = intrinsic
-
-                img_T_lidar = K @ cam_T_lidar
-                # are the image undistorted? -> normally you would use the pin hole camera model here ...
-
-                lidar2img_rts.append(img_T_lidar)
-
-            input_dict.update(
-                dict(
-                    img_filename=image_paths,
-                    lidar2img=lidar2img_rts,
-                )
-            )
-
+        # add the annotations
         if not self.test_mode:
             annos = self.get_ann_info(index)
             input_dict["ann_info"] = annos
 
+        print("input =", input_dict["prev"])
+        print("keys =", input_dict.keys())
+        # exit(0)
         return input_dict
 
     def get_ann_info(self, index):
@@ -611,8 +625,8 @@ def lidar_nusc_box_to_global(
     box_list = []
     for box in boxes:
         # Move box to ego vehicle coord system
-        box.rotate(pyquaternion.Quaternion(info["lidar2ego_rotation"]))
-        box.translate(np.array(info["lidar2ego_translation"]))
+        box.rotate(pyquaternion.Quaternion(info["ego_R_lidar"]))
+        box.translate(np.array(info["ego_t_lidar"]))
         # filter det in ego.
         cls_range_map = eval_configs.class_range
         radius = np.linalg.norm(box.center[:2], 2)
@@ -620,7 +634,7 @@ def lidar_nusc_box_to_global(
         if radius > det_range:
             continue
         # Move box to global coord system
-        box.rotate(pyquaternion.Quaternion(info["ego2global_rotation"]))
-        box.translate(np.array(info["ego2global_translation"]))
+        box.rotate(pyquaternion.Quaternion(info["global_R_ego"]))
+        box.translate(np.array(info["global_t_ego"]))
         box_list.append(box)
     return box_list
