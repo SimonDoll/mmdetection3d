@@ -10,10 +10,12 @@ from mmdet3d.core.points import BasePoints, get_points_type
 
 
 @PIPELINES.register_module()
-class AugmentPointsWithCurrentImageFeatures:
+class AugmentPointsWithImageFeatures:
     """Adds image rgb features to a pointcloud"""
 
-    def __init__(self, filter_non_matched=True, coord_type="LIDAR"):
+    def __init__(
+        self, filter_non_matched=True, coord_type="LIDAR", use_dim=[0, 1, 2, 3]
+    ):
         """
         Args:
             filter_non_matched (bool) wether to remove points that do not lie in the images. Defaults to True
@@ -21,19 +23,23 @@ class AugmentPointsWithCurrentImageFeatures:
         self._filter_non_matched = filter_non_matched
         self._coord_type = coord_type
 
-    def __call__(self, results):
+        if isinstance(use_dim, int):
+            use_dim = list(range(use_dim))
+        self._use_dim = use_dim
 
-        points_dim = results["points"].points_dim
+    def __call__(self, results):
         points = results["points"].tensor
         device = points.device
-
         lidar2imgs = (
             torch.tensor(
-                results["lidar2img"],
+                results["img_T_lidar"],
             )
             .to(device)
             .float()
         )
+
+        print("lidar 2 imgs =", lidar2imgs)
+        exit(0)
 
         # h x w x channels x cameras
         imgs = results["img"]
@@ -102,6 +108,10 @@ class AugmentPointsWithCurrentImageFeatures:
             img_row_idxs = projected_points[:, 0].long()
             img_col_idxs = projected_points[:, 1].long()
 
+            self._debug_visualize(
+                img, img_row_idxs, img_col_idxs, projected_points[:, 2], img_idx
+            )
+
             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
             # TODO how to handle overlapping images?
@@ -111,6 +121,7 @@ class AugmentPointsWithCurrentImageFeatures:
         # augment the points with the colors
         valid_point_colors = point_colors[colored_points_mask]
         valid_points = results["points"].tensor[colored_points_mask]
+        valid_points = valid_points[:, self._use_dim]
 
         points = torch.cat((valid_points, valid_point_colors), dim=1)
         points_class = get_points_type(self._coord_type)
@@ -119,24 +130,34 @@ class AugmentPointsWithCurrentImageFeatures:
         # print("new dim =", points.points_dim)
         results["points"] = points
 
+        print("done")
         return results
+
+    def _debug_visualize(self, img, xs, ys, zs, idx):
+        xs = xs.cpu().detach().numpy()
+        ys = ys.cpu().detach().numpy()
+        zs = zs.cpu().detach().numpy()
+
+        img = img.cpu().detach().numpy()
+        img = np.swapaxes(img, 0, 1)
+
+        plt.imshow(img, zorder=1)
+        plt.scatter(xs, ys, zorder=2, s=0.4, c=zs)
+
+        plt.savefig("/workspace/work_dirs/plot" + str(idx) + ".png")
+        plt.clf()
 
 
 @PIPELINES.register_module()
-class AugmentPointsWithCorrespondingImageFeatures:
-    """Adds image rgb features to a pointcloud"""
+class AugmentPrevPointsWithImageFeatures:
+    """Adds image rgb features to the prev pointclouds"""
 
     def __init__(
         self,
         filter_non_matched=True,
         coord_type="LIDAR",
         max_sweeps=10,
-        load_dim=5,
-        use_dim=[0, 1, 2],
-        shift_height=False,
-        file_client_args=dict(backend="disk"),
     ):
-        # TODO additional args such as shift height
         """
         Args:
             filter_non_matched (bool) wether to remove points that do not lie in the images. Defaults to True
@@ -145,69 +166,15 @@ class AugmentPointsWithCorrespondingImageFeatures:
         self._coord_type = coord_type
         self._max_sweeps = max_sweeps
 
-        self.shift_height = shift_height
-        if isinstance(use_dim, int):
-            use_dim = list(range(use_dim))
-        assert (
-            max(use_dim) < load_dim
-        ), f"Expect all used dimensions < {load_dim}, got {use_dim}"
-        assert coord_type in ["CAMERA", "LIDAR", "DEPTH"]
-
-        self._load_dim = load_dim
-        self._use_dim = use_dim
-
-        self.file_client_args = file_client_args.copy()
-        self.file_client = None
-
-    def _load_points(self, pts_filename):
-        """Private function to load point clouds data.
-
-        Args:
-            pts_filename (str): Filename of point clouds data.
-
-        Returns:
-            np.ndarray: An array containing point clouds data.
-        """
-        if self.file_client is None:
-            self.file_client = mmcv.FileClient(**self.file_client_args)
-        try:
-            pts_bytes = self.file_client.get(pts_filename)
-            points = np.frombuffer(pts_bytes, dtype=np.float32)
-        except ConnectionError:
-            mmcv.check_file_exist(pts_filename)
-            if pts_filename.endswith(".npy"):
-                points = np.load(pts_filename)
-            else:
-                points = np.fromfile(pts_filename, dtype=np.float32)
-
-        points = points.reshape(-1, self._load_dim)
-        points = points[:, self._use_dim]
-        attribute_dims = None
-        # TODO attributes
-
-        if self.shift_height:
-            floor_height = np.percentile(points[:, 2], 0.99)
-            height = points[:, 2] - floor_height
-            points = np.concatenate([points, np.expand_dims(height, 1)], 1)
-            attribute_dims = dict(height=3)
-
-        points_class = get_points_type(self._coord_type)
-        points = points_class(
-            points, points_dim=points.shape[-1], attribute_dims=attribute_dims
-        )
-
-        return points
-
     def __call__(self, results):
-        # load the current point cloud and the current images
-        pts_filename = results["pts_filename"]
-        points_current = self._load_points(pts_filename)
+        # augment the current frame
 
-        print("results =", results.keys())
-        exit(0)
-        # self._add_img_features_to_cloud(
-        #     points_current,
-        # )
+        current_pointcloud = results["points"]
+        print(results.keys())
+        exit()
+
+        # augment all prev frames
+        pass
 
     def _add_img_features_to_cloud(self, point_cloud, img_T_lidar_list, imgs):
 

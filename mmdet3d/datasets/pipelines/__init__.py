@@ -22,8 +22,8 @@ from .transforms_3d import (
     RandomFlip3D,
     VoxelBasedPointSampler,
 )
-from .loading_point_augmentation import AugmentPointsWithCurrentImageFeatures
-from .loading_point_augmentation import AugmentPointsWithCorrespondingImageFeatures
+from .loading_point_augmentation import AugmentPointsWithImageFeatures
+from .loading_point_augmentation import AugmentPrevPointsWithImageFeatures
 
 from .loading_custom import LoadPrevPointsFromFile
 
@@ -50,8 +50,8 @@ __all__ = [
     "LoadPointsFromMultiSweeps",
     "BackgroundPointsFilter",
     "VoxelBasedPointSampler",
-    "AugmentPointsWithCurrentImageFeatures",
-    "AugmentPointsWithCorrespondingImageFeatures",
+    "AugmentPointsWithImageFeatures",
+    "AugmentPrevPointsWithImageFeatures",
     "LoadPrevPointsFromFile",
     "LoadPrevMultiViewImagesFromFile",
 ]
