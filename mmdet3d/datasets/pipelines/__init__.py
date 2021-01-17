@@ -23,7 +23,8 @@ from .transforms_3d import (
     VoxelBasedPointSampler,
 )
 from .loading_point_augmentation import AugmentPointsWithImageFeatures
-from .loading_point_augmentation import AugmentPrevPointsWithImageFeatures
+
+# from .loading_point_augmentation import AugmentPrevPointsWithImageFeatures
 
 from .loading_custom import LoadPrevPointsFromFile
 
@@ -51,7 +52,7 @@ __all__ = [
     "BackgroundPointsFilter",
     "VoxelBasedPointSampler",
     "AugmentPointsWithImageFeatures",
-    "AugmentPrevPointsWithImageFeatures",
+    # "AugmentPrevPointsWithImageFeatures",
     "LoadPrevPointsFromFile",
     "LoadPrevMultiViewImagesFromFile",
 ]

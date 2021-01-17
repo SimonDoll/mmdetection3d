@@ -14,7 +14,11 @@ class AugmentPointsWithImageFeatures:
     """Adds image rgb features to a pointcloud"""
 
     def __init__(
-        self, filter_non_matched=True, coord_type="LIDAR", use_dim=[0, 1, 2, 3]
+        self,
+        filter_non_matched=True,
+        coord_type="LIDAR",
+        use_dim=[0, 1, 2, 3],
+        filter_close=1.0,
     ):
         """
         Args:
@@ -27,6 +31,10 @@ class AugmentPointsWithImageFeatures:
             use_dim = list(range(use_dim))
         self._use_dim = use_dim
 
+        if filter_close:
+            assert filter_close >= 0.0
+        self._filter_close = filter_close
+
     def __call__(self, results):
         points = results["points"].tensor
         device = points.device
@@ -37,9 +45,6 @@ class AugmentPointsWithImageFeatures:
             .to(device)
             .float()
         )
-
-        print("lidar 2 imgs =", lidar2imgs)
-        exit(0)
 
         # h x w x channels x cameras
         imgs = results["img"]
@@ -56,6 +61,7 @@ class AugmentPointsWithImageFeatures:
 
         # get x y z only
         points = points[:, 0:3]
+
         # bring the points to homogenous coords
         points = torch.cat((points, torch.ones((len(points), 1))), dim=1)
 
@@ -66,30 +72,31 @@ class AugmentPointsWithImageFeatures:
         # n x color channels
         points_colors = torch.zeros((len(points), imgs.shape[-1]), dtype=imgs.dtype)
 
-        # only valid at colored_points_mask
-        point_colors = torch.zeros((len(points), imgs.shape[-1]))
-
         # make points a row vector n x 4 x 1
         # (enables us to use batch matrix multiplication)
-        points = torch.unsqueeze(points, dim=2)
+        # points = torch.unsqueeze(points, dim=2)
 
         for img_idx in range(len(lidar2imgs)):
             img_mat = lidar2imgs[img_idx]
             img = imgs[img_idx]
 
             # transform all points on the img plane of the currently selected img
-            # expand the img mat to n x 4 x 4
-            img_mat = img_mat.expand((len(points), img_mat.shape[0], img_mat.shape[1]))
 
-            # batch matrix mul n x 4 x 4 @ n x 4 x 1 -> n x 4 x 1
-            projected_points = torch.bmm(img_mat, points)
-
-            # make points a column vector -> n x 4
-            projected_points = torch.squeeze(projected_points, dim=2)
+            # use the theorem:
+            # if points would have been 4 x 1 (single point)
+            # (Img_mat . Points)^T = Points^T . Img_mat^T
+            # (4 x 4 . 4 x 1)^T = (1 x 4) . (4 x 4) -> 1 x 4
+            # this can be generalized for n points
+            # points is n x 4 already (no need to transpose)
+            projected_points = points @ img_mat.T
 
             # normalize the projected coordinates
-            projected_points[0] /= projected_points[2]
-            projected_points[1] /= projected_points[2]
+            depth = projected_points[:, 2]
+            # add an epsilon to prevent division by zero
+            depth[depth == 0.0] = torch.finfo(torch.float32).eps
+
+            projected_points[:, 0] = torch.div(projected_points[:, 0], depth)
+            projected_points[:, 1] = torch.div(projected_points[:, 1], depth)
 
             # create a mask of valid points
             # valid means that the points lie inside the image x y borders, z is not filtered here
@@ -100,7 +107,13 @@ class AugmentPointsWithImageFeatures:
                 projected_points[:, 1] > 0, projected_points[:, 1] < img.shape[1]
             )
 
-            valid_points_mask = torch.logical_and(mask_x, mask_y)
+            if self._filter_close:
+                valid_points_mask = torch.logical_and(mask_x, mask_y)
+                mask_z = projected_points[:, 2] > self._filter_close
+                valid_points_mask = torch.logical_and(valid_points_mask, mask_z)
+
+            else:
+                valid_points_mask = torch.logical_and(mask_x, mask_y)
 
             # use only the points inside the image
             projected_points = projected_points[valid_points_mask]
@@ -109,7 +122,11 @@ class AugmentPointsWithImageFeatures:
             img_col_idxs = projected_points[:, 1].long()
 
             self._debug_visualize(
-                img, img_row_idxs, img_col_idxs, projected_points[:, 2], img_idx
+                img,
+                projected_points[:, 0].long(),
+                projected_points[:, 1].long(),
+                projected_points[:, 2],
+                img_idx,
             )
 
             projected_points_colors = img[img_row_idxs, img_col_idxs]
@@ -119,7 +136,7 @@ class AugmentPointsWithImageFeatures:
             colored_points_mask[valid_points_mask] = True
 
         # augment the points with the colors
-        valid_point_colors = point_colors[colored_points_mask]
+        valid_point_colors = points_colors[colored_points_mask]
         valid_points = results["points"].tensor[colored_points_mask]
         valid_points = valid_points[:, self._use_dim]
 
@@ -132,6 +149,84 @@ class AugmentPointsWithImageFeatures:
 
         print("done")
         return results
+
+    # def __call__(self, results):
+    #     lidar2imgs = results["img_T_lidar"]
+    #     print("len =", len(lidar2imgs))
+    #     # channels x h x w x cameras
+    #     imgs = results["img"]
+    #     print("imgs =", imgs.shape)
+    #     # cameras x h x w x channels
+    #     reshaped = []
+    #     for i in range(imgs.shape[-1]):
+    #         img = imgs[:, :, :, i]
+    #         reshaped.append(img)
+    #     reshaped = np.asarray(reshaped)
+    #     print("reshaped =", reshaped.shape)
+    #     imgs = np.moveaxis(imgs, -1, 0)
+    #     imgs = reshaped
+
+    #     points = results["points"].tensor
+
+    #     points_4d = points[:, 0:4]
+
+    #     print("points shape =", points.shape)
+    #     points_dim = results["points"].points_dim
+
+    #     for idx in range(len(lidar2imgs)):
+    #         img_mat = lidar2imgs[idx]
+
+    #         img_mat = torch.Tensor(img_mat)
+
+    #         # print("img mat shape =", img_mat.shape)
+
+    #         img = imgs[idx]
+    #         # img mat is 4x4 projection to img plane
+
+    #         print(points_4d.shape)
+
+    #         count = 0
+    #         xs = []
+    #         ys = []
+    #         zs = []
+    #         for p in points_4d:
+    #             print("p =", p)
+    #             point4d = torch.cat((p[0:3], torch.tensor([1])))
+    #             point_projected = img_mat @ point4d
+    #             print("proj =", point_projected.shape)
+    #             print("img mat =", img_mat.shape)
+    #             print("img mat =", img_mat)
+
+    #             x = point_projected[0]
+    #             y = point_projected[1]
+    #             z = point_projected[2]
+    #             x /= z
+    #             y /= z
+
+    #             if z < 1.0:
+    #                 # skip close points
+    #                 continue
+
+    #             # print(x, ",", y)
+    #             if x >= 0 and x < 1600 and y >= 0 and y < 900:
+    #                 xs.append(x.item())
+    #                 ys.append(y.item())
+    #                 zs.append(z.item())
+    #                 count += 1
+    #                 # hits[int(y), int(x)] = np.asarray([255, 255, 255])
+    #                 # img[int(y), int(x)] = np.asarray([255, 0, 0])
+
+    #         print("count =", count)
+    #         print("xs =", xs[0:5])
+    #         print("ys =", ys[0:5])
+    #         print("zs =", zs[0:5])
+    #         plt.imshow(img, zorder=1)
+    #         plt.scatter(xs, ys, zorder=2, s=0.4, c=zs)
+
+    #         plt.savefig("/workspace/work_dirs/plot" + str(idx) + ".png")
+    #         plt.clf()
+
+    #         exit(0)
 
     def _debug_visualize(self, img, xs, ys, zs, idx):
         xs = xs.cpu().detach().numpy()
@@ -148,123 +243,123 @@ class AugmentPointsWithImageFeatures:
         plt.clf()
 
 
-@PIPELINES.register_module()
-class AugmentPrevPointsWithImageFeatures:
-    """Adds image rgb features to the prev pointclouds"""
+# @PIPELINES.register_module()
+# class AugmentPrevPointsWithImageFeatures:
+#     """Adds image rgb features to the prev pointclouds"""
 
-    def __init__(
-        self,
-        filter_non_matched=True,
-        coord_type="LIDAR",
-        max_sweeps=10,
-    ):
-        """
-        Args:
-            filter_non_matched (bool) wether to remove points that do not lie in the images. Defaults to True
-        """
-        self._filter_non_matched = filter_non_matched
-        self._coord_type = coord_type
-        self._max_sweeps = max_sweeps
+#     def __init__(
+#         self,
+#         filter_non_matched=True,
+#         coord_type="LIDAR",
+#         max_sweeps=10,
+#     ):
+#         """
+#         Args:
+#             filter_non_matched (bool) wether to remove points that do not lie in the images. Defaults to True
+#         """
+#         self._filter_non_matched = filter_non_matched
+#         self._coord_type = coord_type
+#         self._max_sweeps = max_sweeps
 
-    def __call__(self, results):
-        # augment the current frame
+#     def __call__(self, results):
+#         # augment the current frame
 
-        current_pointcloud = results["points"]
-        print(results.keys())
-        exit()
+#         current_pointcloud = results["points"]
+#         print(results.keys())
+#         exit()
 
-        # augment all prev frames
-        pass
+#         # augment all prev frames
+#         pass
 
-    def _add_img_features_to_cloud(self, point_cloud, img_T_lidar_list, imgs):
+#     def _add_img_features_to_cloud(self, point_cloud, img_T_lidar_list, imgs):
 
-        points = point_cloud.tensor
-        device = points.device
+#         points = point_cloud.tensor
+#         device = points.device
 
-        img_T_lidar_tensors = torch.tensor(img_T_lidar_list).to(device).float()
+#         img_T_lidar_tensors = torch.tensor(img_T_lidar_list).to(device).float()
 
-        # TODO do in torch
-        # move the img dimension to front
-        imgs = np.moveaxis(imgs, -1, 0)
+#         # TODO do in torch
+#         # move the img dimension to front
+#         imgs = np.moveaxis(imgs, -1, 0)
 
-        # swap width and height
-        imgs = np.swapaxes(imgs, 1, 2)
+#         # swap width and height
+#         imgs = np.swapaxes(imgs, 1, 2)
 
-        # cameras x w x h x color channels
-        imgs = torch.from_numpy(imgs).to(device)
+#         # cameras x w x h x color channels
+#         imgs = torch.from_numpy(imgs).to(device)
 
-        # get x y z only
-        points = points[:, 0:3]
-        # bring the points to homogenous coords
-        points = torch.cat((points, torch.ones((len(points), 1))), dim=1)
+#         # get x y z only
+#         points = points[:, 0:3]
+#         # bring the points to homogenous coords
+#         points = torch.cat((points, torch.ones((len(points), 1))), dim=1)
 
-        # marks points that have a valid color value
-        colored_points_mask = torch.zeros((len(points),), dtype=torch.bool)
+#         # marks points that have a valid color value
+#         colored_points_mask = torch.zeros((len(points),), dtype=torch.bool)
 
-        # create the result array to store the colored points in
-        # n x color channels
-        points_colors = torch.zeros((len(points), imgs.shape[-1]), dtype=imgs.dtype)
+#         # create the result array to store the colored points in
+#         # n x color channels
+#         points_colors = torch.zeros((len(points), imgs.shape[-1]), dtype=imgs.dtype)
 
-        # only valid at colored_points_mask
-        point_colors = torch.zeros((len(points), imgs.shape[-1]))
+#         # only valid at colored_points_mask
+#         point_colors = torch.zeros((len(points), imgs.shape[-1]))
 
-        # make points a row vector n x 4 x 1
-        # (enables us to use batch matrix multiplication)
-        points = torch.unsqueeze(points, dim=2)
+#         # make points a row vector n x 4 x 1
+#         # (enables us to use batch matrix multiplication)
+#         points = torch.unsqueeze(points, dim=2)
 
-        for img_idx in range(len(img_T_lidar_tensors)):
-            img_T_lidar = img_T_lidar_tensors[img_idx]
-            img = imgs[img_idx]
+#         for img_idx in range(len(img_T_lidar_tensors)):
+#             img_T_lidar = img_T_lidar_tensors[img_idx]
+#             img = imgs[img_idx]
 
-            # transform all points on the img plane of the currently selected img
-            # expand the img mat to n x 4 x 4
-            img_T_lidar = img_T_lidar.expand(
-                (len(points), img_T_lidar.shape[0], img_T_lidar.shape[1])
-            )
+#             # transform all points on the img plane of the currently selected img
+#             # expand the img mat to n x 4 x 4
+#             img_T_lidar = img_T_lidar.expand(
+#                 (len(points), img_T_lidar.shape[0], img_T_lidar.shape[1])
+#             )
 
-            # TODO maybe switch to (AB)^T = B^T @ A^T pattern
-            # batch matrix mul n x 4 x 4 @ n x 4 x 1 -> n x 4 x 1
-            projected_points = torch.bmm(img_T_lidar, points)
+#             # TODO maybe switch to (AB)^T = B^T @ A^T pattern
+#             # batch matrix mul n x 4 x 4 @ n x 4 x 1 -> n x 4 x 1
+#             projected_points = torch.bmm(img_T_lidar, points)
 
-            # make points a column vector -> n x 4
-            projected_points = torch.squeeze(projected_points, dim=2)
+#             # make points a column vector -> n x 4
+#             projected_points = torch.squeeze(projected_points, dim=2)
 
-            # normalize the projected coordinates
-            projected_points[0] /= projected_points[2]
-            projected_points[1] /= projected_points[2]
+#             # normalize the projected coordinates
+#             projected_points[0] /= projected_points[2]
+#             projected_points[1] /= projected_points[2]
 
-            # create a mask of valid points
-            # valid means that the points lie inside the image x y borders, z is not filtered here
-            mask_x = torch.logical_and(
-                projected_points[:, 0] > 0, projected_points[:, 0] < img.shape[0]
-            )
-            mask_y = torch.logical_and(
-                projected_points[:, 1] > 0, projected_points[:, 1] < img.shape[1]
-            )
+#             # create a mask of valid points
+#             # valid means that the points lie inside the image x y borders, z is not filtered here
+#             mask_x = torch.logical_and(
+#                 projected_points[:, 0] > 0, projected_points[:, 0] < img.shape[0]
+#             )
+#             mask_y = torch.logical_and(
+#                 projected_points[:, 1] > 0, projected_points[:, 1] < img.shape[1]
+#             )
 
-            valid_points_mask = torch.logical_and(mask_x, mask_y)
+#             valid_points_mask = torch.logical_and(mask_x, mask_y)
 
-            # use only the points inside the image
-            projected_points = projected_points[valid_points_mask]
-            # get x y as pixel indices
-            img_row_idxs = projected_points[:, 0].long()
-            img_col_idxs = projected_points[:, 1].long()
+#             # use only the points inside the image
+#             projected_points = projected_points[valid_points_mask]
+#             # get x y as pixel indices
+#             img_row_idxs = projected_points[:, 0].long()
+#             img_col_idxs = projected_points[:, 1].long()
 
-            projected_points_colors = img[img_row_idxs, img_col_idxs]
+#             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
-            # TODO how to handle overlapping images?
-            points_colors[valid_points_mask] = projected_points_colors
-            colored_points_mask[valid_points_mask] = True
+#             # TODO how to handle overlapping images?
+#             points_colors[valid_points_mask] = projected_points_colors
+#             colored_points_mask[valid_points_mask] = True
 
-        # augment the points with the colors
-        valid_point_colors = point_colors[colored_points_mask]
-        valid_points = point_cloud.tensor[colored_points_mask]
+#         # augment the points with the colors
+#         valid_point_colors = point_colors[colored_points_mask]
+#         valid_points = point_cloud.tensor[colored_points_mask]
 
-        points = torch.cat((valid_points, valid_point_colors), dim=1)
-        points_class = get_points_type(self._coord_type)
-        # TODO attributes
-        points = points_class(points, points_dim=points.shape[-1], attribute_dims=None)
-        # print("new dim =", points.points_dim)
-        point_cloud = points
+#         points = torch.cat((valid_points, valid_point_colors), dim=1)
+#         points_class = get_points_type(self._coord_type)
+#         # TODO attributes
+#         points = points_class(points, points_dim=points.shape[-1], attribute_dims=None)
+#         # print("new dim =", points.points_dim)
+#         point_cloud = points
 
-        return point_cloud
+#         return point_cloud
