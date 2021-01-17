@@ -54,9 +54,9 @@ class LoadPrevPointsFromFile:
             np.ndarray: An array containing point clouds data.
         """
         if self._file_client is None:
-            self._file_client = mmcv.FileClient(**self.file_client_args)
+            self._file_client = mmcv.FileClient(**self._file_client_args)
         try:
-            pts_bytes = self.file_client.get(pts_filename)
+            pts_bytes = self._file_client.get(pts_filename)
             points = np.frombuffer(pts_bytes, dtype=np.float32)
         except ConnectionError:
             mmcv.check_file_exist(pts_filename)
@@ -85,6 +85,82 @@ class LoadPrevPointsFromFile:
 
     def __call__(self, results):
         prev_list = results["prev"]
-        for i in range(len(prev_list)):
+        for i in range(min(len(prev_list), self._max_sweeps)):
             pointcloud = self._load_points(prev_list[i]["pts_filename"])
             prev_list[i]["points"] = pointcloud
+
+        results["prev"] = prev_list
+        return results
+
+
+@PIPELINES.register_module()
+class LoadPrevMultiViewImagesFromFile(object):
+    """Load multi channel images from a list of separate channel files.
+
+    Expects results['img_filename'] to be a list of filenames.
+
+    Args:
+        to_float32 (bool): Whether to convert the img to float32.
+            Defaults to False.
+        color_type (str): Color type of the file. Defaults to 'unchanged'.
+    """
+
+    def __init__(self, to_float32=False, color_type="unchanged", max_elems=10):
+        self._to_float32 = to_float32
+        self._color_type = color_type
+        self._max_elems = max_elems
+
+    def _load_imgs(self, results):
+        """Call function to load multi-view image from files.
+
+        Args:
+            results (dict): Result dict containing multi-view image filenames.
+
+        Returns:
+            dict: The result dict containing the multi-view image data. \
+                Added keys and values are described below.
+
+                - filename (str): Multi-view image filenames.
+                - img (np.ndarray): Multi-view image arrays.
+                - img_shape (tuple[int]): Shape of multi-view image arrays.
+                - ori_shape (tuple[int]): Shape of original image arrays.
+                - pad_shape (tuple[int]): Shape of padded image arrays.
+                - scale_factor (float): Scale factor.
+                - img_norm_cfg (dict): Normalization configuration of images.
+        """
+
+        filenames = results["img_filename"]
+        img = np.stack(
+            [mmcv.imread(name, self._color_type) for name in filenames], axis=-1
+        )
+        if self._to_float32:
+            img = img.astype(np.float32)
+        results["filename"] = filenames
+        results["img"] = img
+        results["img_shape"] = img.shape
+        results["ori_shape"] = img.shape
+        # Set initial values for default meta_keys
+        results["pad_shape"] = img.shape
+        results["scale_factor"] = 1.0
+        num_channels = 1 if len(img.shape) < 3 else img.shape[2]
+        results["img_norm_cfg"] = dict(
+            mean=np.zeros(num_channels, dtype=np.float32),
+            std=np.ones(num_channels, dtype=np.float32),
+            to_rgb=False,
+        )
+        return results
+
+    def __call__(self, results):
+        prev_list = results["prev"]
+        for i in range(min(len(prev_list), self._max_elems)):
+            result = self._load_imgs(prev_list[i])
+            prev_list[i] = result
+
+        results["prev"] = prev_list
+        return results
+
+    def __repr__(self):
+        """str: Return a string that describes the module."""
+        return "{} (to_float32={}, color_type='{}')".format(
+            self.__class__.__name__, self._to_float32, self._color_type
+        )
