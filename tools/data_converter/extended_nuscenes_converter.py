@@ -248,6 +248,7 @@ def _fill_trainval_infos(
 
 def _collect_sample_data_infos(sample, nusc, max_prev_samples):
     """Collects information about the current and the last x samples
+    This info contains tfs from camera to lidar, camera data tfs lidar ego global and a timestamp
 
     Args:
         sample ([nusc.sample]): current sample.
@@ -300,6 +301,7 @@ def _collect_sample_data_infos(sample, nusc, max_prev_samples):
             "global_t_ego": global_t_ego,
             "global_R_ego": global_R_ego,
             "timestamp": sample["timestamp"],
+            "sample_data_token_lidar": lidar_token,  # this will be used to get transforms after the loop
         }
 
         # obtain 6 image's information per frame
@@ -311,6 +313,7 @@ def _collect_sample_data_infos(sample, nusc, max_prev_samples):
             "CAM_BACK_LEFT",
             "CAM_BACK_RIGHT",
         ]
+        # add camera info
         for cam in camera_types:
             cam_token = sample["data"][cam]
             _, _, cam_intrinsic = nusc.get_sample_data(cam_token)
@@ -327,6 +330,45 @@ def _collect_sample_data_infos(sample, nusc, max_prev_samples):
             info["cams"].update({cam: cam_info})
 
         sample_infos.append(info)
+
+    # now we need to add tf information from the prev frames to the current one
+    current_sample_infos = sample_infos[0]
+    # get the transforms from lidar to global at current time stamp
+    ego_current_t_lidar = current_sample_infos["ego_t_lidar"]
+    ego_current_R_lidar = current_sample_infos["ego_R_lidar"]
+    global_current_t_ego = current_sample_infos["global_t_ego"]
+    global_current_R_ego = current_sample_infos["global_R_ego"]
+
+    # this loop runs only of there are previous samples
+    for i in range(len(sample_infos)):
+        if i == 0:
+            # the first sample is the current one -> skip
+            continue
+
+        prev = sample_infos[i]
+        sensor_sample_data_token = prev["sample_data_token_lidar"]
+
+        # get lidar_current_T_lidar_prev (ego motion compensation)
+        lidar_current_T_lidar_prev_infos = transform_sensor_to_lidar_top(
+            nusc,
+            sensor_sample_data_token,
+            ego_current_t_lidar,
+            ego_current_R_lidar,
+            global_current_t_ego,
+            global_current_R_ego,
+            "lidar",
+        )
+        # extract only the transform information (the rest is set already)
+        # TODO maybe rework the interface to avoid this second stage here
+        prev["lidar_current_t_lidar_prev"] = lidar_current_T_lidar_prev_infos[
+            "lidar_t_sensor"
+        ]
+        prev["lidar_current_R_lidar_prev"] = lidar_current_T_lidar_prev_infos[
+            "lidar_R_sensor"
+        ]
+        # update the sample infos
+        sample_infos[i] = prev
+
     return sample_infos
 
 
@@ -360,8 +402,6 @@ def transform_sensor_to_lidar_top(
     cs_record = nusc.get("calibrated_sensor", sd_rec["calibrated_sensor_token"])
     pose_record = nusc.get("ego_pose", sd_rec["ego_pose_token"])
     data_path = str(nusc.get_sample_data_path(sd_rec["token"]))
-    if os.getcwd() in data_path:  # path from lyftdataset is absolute path
-        data_path = data_path.split(f"{os.getcwd()}/")[-1]  # relative path
 
     # theese transforms are at time of sensor e.g. camera
     ego_sensor_t_sensor = cs_record["translation"]
@@ -376,8 +416,8 @@ def transform_sensor_to_lidar_top(
         "sample_data_token": sd_rec["token"],
         "ego_t_sensor": ego_sensor_t_sensor,
         "ego_R_sensor": ego_sensor_R_sensor,
-        "ego2global_translation": global_sensor_t_ego,
-        "ego2global_rotation": global_sensor_R_ego,
+        "global_t_ego": global_sensor_t_ego,
+        "global_R_ego": global_sensor_R_ego,
         "timestamp": sd_rec["timestamp"],
     }
 
