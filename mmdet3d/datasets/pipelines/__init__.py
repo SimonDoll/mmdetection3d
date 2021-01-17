@@ -22,7 +22,10 @@ from .transforms_3d import (
     RandomFlip3D,
     VoxelBasedPointSampler,
 )
-from .custom_modules import AugmentPointsWithImageFeats
+from .loading_point_augmentation import AugmentPointsWithCurrentImageFeatures
+from .loading_point_augmentation import AugmentPointsWithCorrespondingImageFeatures
+
+from .loading_custom import LoadPrevPointsFromFile
 
 __all__ = [
     "ObjectSample",
@@ -47,5 +50,7 @@ __all__ = [
     "LoadPointsFromMultiSweeps",
     "BackgroundPointsFilter",
     "VoxelBasedPointSampler",
-    "AugmentPointsWithImageFeats",
+    "AugmentPointsWithCurrentImageFeatures",
+    "AugmentPointsWithCorrespondingImageFeatures",
+    "LoadPrevPointsFromFile",
 ]
