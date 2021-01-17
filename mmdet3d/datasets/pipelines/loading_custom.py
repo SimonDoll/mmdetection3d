@@ -135,7 +135,6 @@ class LoadPrevMultiViewImagesFromFile(object):
         )
         if self._to_float32:
             img = img.astype(np.float32)
-        results["filename"] = filenames
         results["img"] = img
         results["img_shape"] = img.shape
         results["ori_shape"] = img.shape
@@ -155,7 +154,6 @@ class LoadPrevMultiViewImagesFromFile(object):
         for i in range(min(len(prev_list), self._max_elems)):
             result = self._load_imgs(prev_list[i])
             prev_list[i] = result
-
         results["prev"] = prev_list
         return results
 
