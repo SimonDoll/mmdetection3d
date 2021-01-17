@@ -201,9 +201,17 @@ class LoadPointsFromMultiSweeps(object):
 
                 sweep_ts = prev["timestamp"]
 
-                # transform the sweep (ego compensation)
+                # transform the points this is done in a highly optimized manner:
+                # lidar_current_T_lidar_prev
+                # regualr way would be:
+                # rot @ p (3x3) @ (3x1) but since
+                # (AB)^T = B^T @ A^T
+                # points = B^T already (n x 3)
+                # transpose A (rot)
+                # the result does not need to be transposed back since we want n x 3 not 3 x n
+
                 points_sweep[:, :3] = (
-                    points_sweep[:, :3] @ prev["lidar_current_R_lidar_prev"]
+                    points_sweep[:, :3] @ prev["lidar_current_R_lidar_prev"].T
                 )
                 points_sweep[:, :3] += prev["lidar_current_t_lidar_prev"]
                 points_sweep[:, 4] = ts - sweep_ts
