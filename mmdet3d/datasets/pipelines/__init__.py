@@ -53,4 +53,5 @@ __all__ = [
     "AugmentPointsWithCurrentImageFeatures",
     "AugmentPointsWithCorrespondingImageFeatures",
     "LoadPrevPointsFromFile",
+    "LoadPrevMultiViewImagesFromFile",
 ]
