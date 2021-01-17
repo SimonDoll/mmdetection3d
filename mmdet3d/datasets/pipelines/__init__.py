@@ -52,7 +52,7 @@ __all__ = [
     "BackgroundPointsFilter",
     "VoxelBasedPointSampler",
     "AugmentPointsWithImageFeatures",
-    # "AugmentPrevPointsWithImageFeatures",
+    "AugmentPrevPointsWithImageFeatures",
     "LoadPrevPointsFromFile",
     "LoadPrevMultiViewImagesFromFile",
 ]
