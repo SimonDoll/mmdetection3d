@@ -10,16 +10,6 @@ from shapely.geometry import MultiPoint, box
 from typing import List, Tuple, Union
 
 
-from .nuscenes_converter import (
-    create_nuscenes_infos,
-    get_available_scenes,
-    _fill_trainval_infos,
-    obtain_sensor2top,
-    export_2d_annotation,
-    get_2d_boxes,
-    post_process_coords,
-    generate_record,
-)
 from mmdet3d.datasets import NuScenesDataset
 
 nus_categories = (
@@ -37,7 +27,7 @@ nus_categories = (
 
 
 def create_nuscenes_infos(
-    root_path, info_prefix, version="v1.0-trainval", max_sweeps=10
+    root_path, info_prefix, version="v1.0-trainval", max_prev_samples=10
 ):
     """Create info file of nuscene dataset.
 
@@ -48,7 +38,7 @@ def create_nuscenes_infos(
         info_prefix (str): Prefix of the info file to be generated.
         version (str): Version of the data.
             Default: 'v1.0-trainval'
-        max_sweeps (int): Max number of sweeps.
+        max_prev_samples (int): Max number of previous samples to include per sample.
             Default: 10
     """
     from nuscenes.nuscenes import NuScenes
@@ -93,7 +83,7 @@ def create_nuscenes_infos(
             "train scene: {}, val scene: {}".format(len(train_scenes), len(val_scenes))
         )
     train_nusc_infos, val_nusc_infos = _fill_trainval_infos(
-        nusc, train_scenes, val_scenes, test, max_sweeps=max_sweeps
+        nusc, train_scenes, val_scenes, test, max_prev_samples=max_prev_samples
     )
 
     metadata = dict(version=version)
@@ -157,7 +147,9 @@ def get_available_scenes(nusc):
     return available_scenes
 
 
-def _fill_trainval_infos(nusc, train_scenes, val_scenes, test=False, max_sweeps=10):
+def _fill_trainval_infos(
+    nusc, train_scenes, val_scenes, test=False, max_prev_samples=10
+):
     """Generate the train/val infos from the raw data.
     Args:
         nusc (:obj:`NuScenes`): Dataset class in the nuScenes dataset.
@@ -165,7 +157,7 @@ def _fill_trainval_infos(nusc, train_scenes, val_scenes, test=False, max_sweeps=
         val_scenes (list[str]): Basic information of validation scenes.
         test (bool): Whether use the test mode. In the test mode, no
             annotations can be accessed. Default: False.
-        max_sweeps (int): Max number of sweeps. Default: 10.
+        max_prev_samples (int): Max number of previous samples to use. Default: 10.
     Returns:
         tuple[list[dict]]: Information of training set and validation set
             that will be saved to the info file.
@@ -174,7 +166,7 @@ def _fill_trainval_infos(nusc, train_scenes, val_scenes, test=False, max_sweeps=
     val_nusc_infos = []
 
     for sample in mmcv.track_iter_progress(nusc.sample):
-        sample_infos = _collect_sample_data_infos(sample, nusc, max_sweeps)
+        sample_infos = _collect_sample_data_infos(sample, nusc, max_prev_samples)
         current_frame_info = sample_infos[0]
         prev_frames_infos = sample_infos[1:]
 
@@ -251,13 +243,23 @@ def _fill_trainval_infos(nusc, train_scenes, val_scenes, test=False, max_sweeps=
     return train_nusc_infos, val_nusc_infos
 
 
-def _collect_sample_data_infos(sample, nusc, max_sweeps):
+def _collect_sample_data_infos(sample, nusc, max_prev_samples):
+    """Collects information about the current and the last x samples
+
+    Args:
+        sample ([nusc.sample]): current sample.
+        nusc (Nuscenes devkit instance): nuscenes devkit instance to use.
+        max_prev_samples (int): amount of previous samples to use.
+
+    Returns:
+        list: list of dicts with information about the samples ([0] is current,... last is oldest)
+    """
     # for each sample we need the previous x samples that we want to collect data about as well
-    # collect the samples (current sample is counted -> sample + max_sweeps -1)
+    # collect the samples (current sample is counted -> sample + max_prev_samples -1)
     sample_list = [sample]
     most_recent_sample_token = sample["token"]
     current_sample_token = sample["token"]
-    for _ in range(max_sweeps - 1):
+    for _ in range(max_prev_samples - 1):
         current_sample = nusc.get("sample", current_sample_token)
         # check if there is a sample
         if current_sample["prev"]:
@@ -310,8 +312,8 @@ def _collect_sample_data_infos(sample, nusc, max_sweeps):
         ]
         for cam in camera_types:
             cam_token = sample["data"][cam]
-            cam_path, _, cam_intrinsic = nusc.get_sample_data(cam_token)
-            cam_info = obtain_sensor2top(
+            _, _, cam_intrinsic = nusc.get_sample_data(cam_token)
+            cam_info = transform_sensor_to_lidar_top(
                 nusc, cam_token, l2e_t, l2e_r_mat, e2g_t, e2g_r_mat, cam
             )
             cam_info.update(cam_intrinsic=cam_intrinsic)
@@ -321,25 +323,31 @@ def _collect_sample_data_infos(sample, nusc, max_sweeps):
     return sample_infos
 
 
-def obtain_sensor2top(
-    nusc, sensor_token, l2e_t, l2e_r_mat, e2g_t, e2g_r_mat, sensor_type="lidar"
+def transform_sensor_to_lidar_top(
+    nusc,
+    sensor_token,
+    ego_t_lidar,
+    ego_R_lidar,
+    global_t_ego,
+    global_R_ego,
+    sensor_type="lidar",
 ):
-    """Obtain the info with RT matric from general sensor to Top LiDAR.
+    """Obtain the info with RT matrix from general sensor to Top LiDAR.
 
     Args:
         nusc (class): Dataset class in the nuScenes dataset.
         sensor_token (str): Sample data token corresponding to the
             specific sensor type.
-        l2e_t (np.ndarray): Translation from lidar to ego in shape (1, 3).
-        l2e_r_mat (np.ndarray): Rotation matrix from lidar to ego
+        ego_t_lidar (np.ndarray): Translation from lidar to ego in shape (1, 3).
+        ego_R_lidar (np.ndarray): Rotation matrix from lidar to ego
             in shape (3, 3).
-        e2g_t (np.ndarray): Translation from ego to global in shape (1, 3).
-        e2g_r_mat (np.ndarray): Rotation matrix from ego to global
+        global_t_ego (np.ndarray): Translation from ego to global in shape (1, 3).
+        global_R_ego (np.ndarray): Rotation matrix from ego to global
             in shape (3, 3).
         sensor_type (str): Sensor to calibrate. Default: 'lidar'.
 
     Returns:
-        sweep (dict): Sweep information after transformation.
+        sensor_data_transformed (dict): Sensor data information after transformation.
     """
     sd_rec = nusc.get("sample_data", sensor_token)
     cs_record = nusc.get("calibrated_sensor", sd_rec["calibrated_sensor_token"])
@@ -347,7 +355,7 @@ def obtain_sensor2top(
     data_path = str(nusc.get_sample_data_path(sd_rec["token"]))
     if os.getcwd() in data_path:  # path from lyftdataset is absolute path
         data_path = data_path.split(f"{os.getcwd()}/")[-1]  # relative path
-    sweep = {
+    sensor_data_transformed = {
         "data_path": data_path,
         "type": sensor_type,
         "sample_data_token": sd_rec["token"],
@@ -373,12 +381,12 @@ def obtain_sensor2top(
     # lidar is currently reference
     # transformation at lidar time
     ego_T_lidar = np.eye(4)
-    ego_T_lidar[:3, :3] = l2e_r_mat
-    ego_T_lidar[:3, 3] = l2e_t
+    ego_T_lidar[:3, :3] = ego_R_lidar
+    ego_T_lidar[:3, 3] = ego_t_lidar
 
     global_lidar_T_ego = np.eye(4)
-    global_lidar_T_ego[:3, :3] = e2g_r_mat
-    global_lidar_T_ego[:3, 3] = e2g_t
+    global_lidar_T_ego[:3, :3] = global_R_ego
+    global_lidar_T_ego[:3, 3] = global_t_ego
 
     # lidar_T_camera with correction using global frame discrepancy
     # lidar_T_sensor = lidar_T_ego . ego_T_global . global_T_ego . ego_T_sensor
@@ -386,9 +394,9 @@ def obtain_sensor2top(
         np.linalg.inv(global_lidar_T_ego) @ (global_sensor_T_ego @ ego_T_sensor)
     )
 
-    sweep["sensor2lidar_rotation"] = lidar_T_sensor[:3, :3]
-    sweep["sensor2lidar_translation"] = lidar_T_sensor[:3, 3]
-    return sweep
+    sensor_data_transformed["lidar_R_sensor"] = lidar_T_sensor[:3, :3]
+    sensor_data_transformed["lidar_t_sensor"] = lidar_T_sensor[:3, 3]
+    return sensor_data_transformed
 
 
 def export_2d_annotation(root_path, info_path, version):
