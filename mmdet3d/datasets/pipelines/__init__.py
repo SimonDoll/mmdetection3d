@@ -22,11 +22,14 @@ from .transforms_3d import (
     RandomFlip3D,
     VoxelBasedPointSampler,
 )
-from .loading_point_augmentation import AugmentPointsWithImageFeatures
 
-# from .loading_point_augmentation import AugmentPrevPointsWithImageFeatures
+# own modules
+from .loading_point_augmentation import AugmentPointsWithImageFeatures
+from .loading_point_augmentation import AugmentPrevPointsWithImageFeatures
 
 from .loading_custom import LoadPrevPointsFromFile
+
+from .loading_custom import AccumulatePointClouds
 
 __all__ = [
     "ObjectSample",
@@ -55,4 +58,5 @@ __all__ = [
     "AugmentPrevPointsWithImageFeatures",
     "LoadPrevPointsFromFile",
     "LoadPrevMultiViewImagesFromFile",
+    "AccumulatePointClouds",
 ]
