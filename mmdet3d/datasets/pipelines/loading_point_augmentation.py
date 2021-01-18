@@ -199,9 +199,9 @@ class AugmentPrevPointsWithImageFeatures:
             projected_points = self._add_img_features_to_cloud(
                 prev["points"], prev["img_T_lidar"], prev["img"]
             )
-            prev["points"] = projected_points
+            prev_list[i]["points"] = projected_points
 
-            results["prev"] = prev
+            results["prev"] = prev_list
         return results
 
     def _add_img_features_to_cloud(self, point_cloud, img_T_lidar_list, imgs):
@@ -305,6 +305,7 @@ class AugmentPrevPointsWithImageFeatures:
         # augment the points with the colors
         valid_point_colors = points_colors[colored_points_mask]
         valid_points = point_cloud.tensor[colored_points_mask]
+
         valid_points = valid_points[:, self._use_dim]
 
         points = torch.cat((valid_points, valid_point_colors), dim=1)
