@@ -181,6 +181,7 @@ class AccumulatePointClouds:
         This module merges the loaded prev and current pointclouds, use_dim can be used to use augmented point features as well.
         We add a dimension to the points with relative time diff current - prev for the net to identify the points
         """
+        # TODO arg wether point time delta should be stored or not
 
         self._coord_type = coord_type
         self._max_sweeps = max_sweeps
@@ -282,7 +283,7 @@ class AccumulatePointClouds:
                 )
             for idx in choices:
                 prev = results["prev"][idx]
-                prev_points = prev["points"]
+                prev_points = prev["points"].tensor[:, self._use_dim]
                 if self._remove_close:
                     prev_points = self._remove_close(
                         prev_points, radius=self._remove_close
@@ -310,15 +311,12 @@ class AccumulatePointClouds:
                 deltas = torch.full(
                     (len(prev_points), 1), ts - prev_ts, device=prev_points.device
                 )
-                print("before \n", prev_points[0:5])
-                prev_points = torch.cat((prev_points, deltas))
-                print("after \n", prev_points[0:5])
-                exit(0)
+
+                prev_points = torch.cat((prev_points, deltas), dim=1)
                 prev_points = points.new_point(prev_points)
                 points_list.append(prev_points)
 
         points = points.cat(points_list)
-        points = points[:, self.use_dim]
         results["points"] = points
         return results
 
