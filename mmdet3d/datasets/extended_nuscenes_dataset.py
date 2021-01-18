@@ -368,14 +368,14 @@ class ExtendedNuScenesDataset(Custom3DDataset):
                     elif name in ["bicycle", "motorcycle"]:
                         attr = "cycle.with_rider"
                     else:
-                        attr = NuScenesDataset.DefaultAttribute[name]
+                        attr = ExtendedNuScenesDataset.DefaultAttribute[name]
                 else:
                     if name in ["pedestrian"]:
                         attr = "pedestrian.standing"
                     elif name in ["bus"]:
                         attr = "vehicle.stopped"
                     else:
-                        attr = NuScenesDataset.DefaultAttribute[name]
+                        attr = ExtendedNuScenesDataset.DefaultAttribute[name]
 
                 nusc_anno = dict(
                     sample_token=sample_token,
@@ -629,7 +629,7 @@ def lidar_nusc_box_to_global(
     box_list = []
     for box in boxes:
         # Move box to ego vehicle coord system
-        box.rotate(pyquaternion.Quaternion(info["ego_R_lidar"]))
+        box.rotate(pyquaternion.Quaternion(matrix=info["ego_R_lidar"]))
         box.translate(np.array(info["ego_t_lidar"]))
         # filter det in ego.
         cls_range_map = eval_configs.class_range
@@ -638,7 +638,7 @@ def lidar_nusc_box_to_global(
         if radius > det_range:
             continue
         # Move box to global coord system
-        box.rotate(pyquaternion.Quaternion(info["global_R_ego"]))
+        box.rotate(pyquaternion.Quaternion(matrix=info["global_R_ego"]))
         box.translate(np.array(info["global_t_ego"]))
         box_list.append(box)
     return box_list
