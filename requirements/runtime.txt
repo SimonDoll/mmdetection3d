@@ -1,3 +1,4 @@
+dataset_3d
 lyft_dataset_sdk
 networkx>=2.2,<2.3
 # we may unlock the verion of numba in the future
@@ -8,4 +9,3 @@ scikit-image
 # by default we also use tensorboard to log results
 tensorboard
 trimesh>=2.35.39,<2.35.40
-dataset3d
