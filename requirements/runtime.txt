@@ -1,4 +1,4 @@
-dataset-3d
+dataset-3d==1.0
 lyft_dataset_sdk
 networkx>=2.2,<2.3
 # we may unlock the verion of numba in the future
