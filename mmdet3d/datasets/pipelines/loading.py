@@ -167,6 +167,7 @@ class LoadPointsFromMultiSweeps(object):
                 - points (np.ndarray): Multi-sweep point cloud arrays.
         """
         points = results["points"]
+
         points.tensor[:, 4] = 0
         sweep_points_list = [points]
         ts = results["timestamp"]
@@ -219,7 +220,9 @@ class LoadPointsFromMultiSweeps(object):
                 sweep_points_list.append(points_sweep)
 
         points = points.cat(sweep_points_list)
+
         points = points[:, self.use_dim]
+
         results["points"] = points
         return results
 
@@ -228,7 +231,7 @@ class LoadPointsFromMultiSweeps(object):
         return f"{self.__class__.__name__}(sweeps_num={self.sweeps_num})"
 
 
-@PIPELINES.register_module()
+@ PIPELINES.register_module()
 class PointSegClassMapping(object):
     """Map original semantic class to valid category ids.
 
@@ -275,7 +278,7 @@ class PointSegClassMapping(object):
         return repr_str
 
 
-@PIPELINES.register_module()
+@ PIPELINES.register_module()
 class NormalizePointsColor(object):
     """Normalize color of points.
 
@@ -313,7 +316,7 @@ class NormalizePointsColor(object):
         return repr_str
 
 
-@PIPELINES.register_module()
+@ PIPELINES.register_module()
 class LoadPointsFromFile(object):
     """Load Points From File.
 
@@ -367,6 +370,7 @@ class LoadPointsFromFile(object):
         Returns:
             np.ndarray: An array containing point clouds data.
         """
+
         if self.file_client is None:
             self.file_client = mmcv.FileClient(**self.file_client_args)
         try:
@@ -425,7 +429,7 @@ class LoadPointsFromFile(object):
         return repr_str
 
 
-@PIPELINES.register_module()
+@ PIPELINES.register_module()
 class LoadAnnotations3D(LoadAnnotations):
     """Load Annotations3D.
 
@@ -525,7 +529,8 @@ class LoadAnnotations3D(LoadAnnotations):
             pts_instance_mask = np.frombuffer(mask_bytes, dtype=np.int)
         except ConnectionError:
             mmcv.check_file_exist(pts_instance_mask_path)
-            pts_instance_mask = np.fromfile(pts_instance_mask_path, dtype=np.long)
+            pts_instance_mask = np.fromfile(
+                pts_instance_mask_path, dtype=np.long)
 
         results["pts_instance_mask"] = pts_instance_mask
         results["pts_mask_fields"].append("pts_instance_mask")
@@ -550,7 +555,8 @@ class LoadAnnotations3D(LoadAnnotations):
             pts_semantic_mask = np.frombuffer(mask_bytes, dtype=np.int).copy()
         except ConnectionError:
             mmcv.check_file_exist(pts_semantic_mask_path)
-            pts_semantic_mask = np.fromfile(pts_semantic_mask_path, dtype=np.long)
+            pts_semantic_mask = np.fromfile(
+                pts_semantic_mask_path, dtype=np.long)
 
         results["pts_semantic_mask"] = pts_semantic_mask
         results["pts_seg_fields"].append("pts_semantic_mask")

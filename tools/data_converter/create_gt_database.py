@@ -59,7 +59,8 @@ def _parse_coco_ann_info(ann_info):
     else:
         gt_bboxes_ignore = np.zeros((0, 4), dtype=np.float32)
 
-    ann = dict(bboxes=gt_bboxes, bboxes_ignore=gt_bboxes_ignore, masks=gt_masks_ann)
+    ann = dict(bboxes=gt_bboxes, bboxes_ignore=gt_bboxes_ignore,
+               masks=gt_masks_ann)
 
     return ann
 
@@ -83,7 +84,8 @@ def crop_image_patch_v2(pos_proposals, pos_assigned_gt_inds, gt_masks):
         .to(dtype=rois.dtype)
     )
     # Use RoIAlign could apparently accelerate the training (~0.1s/iter)
-    targets = roi_align(gt_masks_th, rois, mask_size[::-1], 1.0, 0, True).squeeze(1)
+    targets = roi_align(gt_masks_th, rois,
+                        mask_size[::-1], 1.0, 0, True).squeeze(1)
     return targets
 
 
@@ -98,9 +100,9 @@ def crop_image_patch(pos_proposals, gt_masks, pos_assigned_gt_inds, org_img):
         w = np.maximum(x2 - x1 + 1, 1)
         h = np.maximum(y2 - y1 + 1, 1)
 
-        mask_patch = gt_mask[y1 : y1 + h, x1 : x1 + w]
+        mask_patch = gt_mask[y1: y1 + h, x1: x1 + w]
         masked_img = gt_mask[..., None] * org_img
-        img_patch = masked_img[y1 : y1 + h, x1 : x1 + w]
+        img_patch = masked_img[y1: y1 + h, x1: x1 + w]
 
         img_patches.append(img_patch)
         masks.append(mask_patch)
@@ -145,7 +147,8 @@ def create_groundtruth_database(
             Default: False.
     """
     print(f"Create GT Database of {dataset_class_name}")
-    dataset_cfg = dict(type=dataset_class_name, data_root=data_path, ann_file=info_path)
+    dataset_cfg = dict(type=dataset_class_name,
+                       data_root=data_path, ann_file=info_path)
     if dataset_class_name == "KittiDataset":
         file_client_args = dict(backend="disk")
         dataset_cfg.update(
@@ -188,7 +191,8 @@ def create_groundtruth_database(
                     pad_empty_sweeps=True,
                     remove_close=True,
                 ),
-                dict(type="LoadAnnotations3D", with_bbox_3d=True, with_label_3d=True),
+                dict(type="LoadAnnotations3D",
+                     with_bbox_3d=True, with_label_3d=True),
             ],
         )
 
@@ -206,7 +210,25 @@ def create_groundtruth_database(
                     pad_empty_sweeps=True,
                     remove_close=True,
                 ),
-                dict(type="LoadAnnotations3D", with_bbox_3d=True, with_label_3d=True),
+                dict(type="LoadAnnotations3D",
+                     with_bbox_3d=True, with_label_3d=True),
+            ],
+        )
+    elif dataset_class_name == "CarlaDataset":
+        dataset_cfg.update(
+            pipeline=[
+                dict(
+                    type="LoadPointsFromFile", coord_type="LIDAR", load_dim=5, use_dim=5
+                ),
+                dict(
+                    type="LoadPointsFromMultiSweeps",
+                    sweeps_num=10,
+                    use_dim=[0, 1, 2, 3, 4],
+                    pad_empty_sweeps=True,
+                    remove_close=True,
+                ),
+                dict(type="LoadAnnotations3D",
+                     with_bbox_3d=True, with_label_3d=True),
             ],
         )
 
@@ -243,7 +265,8 @@ def create_groundtruth_database(
     if database_save_path is None:
         database_save_path = osp.join(data_path, f"{info_prefix}_gt_database")
     if db_info_save_path is None:
-        db_info_save_path = osp.join(data_path, f"{info_prefix}_dbinfos_train.pkl")
+        db_info_save_path = osp.join(
+            data_path, f"{info_prefix}_dbinfos_train.pkl")
     mmcv.mkdir_or_exist(database_save_path)
     all_db_infos = dict()
     if with_mask:
@@ -259,6 +282,7 @@ def create_groundtruth_database(
         input_dict = dataset.get_data_info(j)
         dataset.pre_pipeline(input_dict)
         example = dataset.pipeline(input_dict)
+
         annos = example["ann_info"]
         image_idx = example["sample_idx"]
         points = example["points"].tensor.numpy()
@@ -288,7 +312,8 @@ def create_groundtruth_database(
             kins_raw_info = coco.loadAnns(kins_annIds)
             kins_ann_info = _parse_coco_ann_info(kins_raw_info)
             h, w = annos["img_shape"][:2]
-            gt_masks = [_poly2mask(mask, h, w) for mask in kins_ann_info["masks"]]
+            gt_masks = [_poly2mask(mask, h, w)
+                        for mask in kins_ann_info["masks"]]
             # get mask inds based on iou mapping
             bbox_iou = bbox_overlaps(kins_ann_info["bboxes"], gt_boxes)
             mask_inds = bbox_iou.argmax(axis=0)

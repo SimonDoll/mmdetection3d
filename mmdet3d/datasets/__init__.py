@@ -5,6 +5,7 @@ from .kitti_dataset import KittiDataset
 from .lyft_dataset import LyftDataset
 from .nuscenes_dataset import NuScenesDataset
 from .extended_nuscenes_dataset import ExtendedNuScenesDataset
+from .carla_dataset import CarlaDataset
 from .pipelines import (
     BackgroundPointsFilter,
     GlobalRotScaleTrans,
@@ -36,6 +37,7 @@ __all__ = [
     "CocoDataset",
     "NuScenesDataset",
     "ExtendedNuScenesDataset",
+    "CarlaDataset",
     "LyftDataset",
     "ObjectSample",
     "RandomFlip3D",

@@ -64,8 +64,10 @@ def nuscenes_data_prep(
 
     info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
     info_val_path = osp.join(root_path, f"{info_prefix}_infos_val.pkl")
-    nuscenes_converter.export_2d_annotation(root_path, info_train_path, version=version)
-    nuscenes_converter.export_2d_annotation(root_path, info_val_path, version=version)
+    nuscenes_converter.export_2d_annotation(
+        root_path, info_train_path, version=version)
+    nuscenes_converter.export_2d_annotation(
+        root_path, info_val_path, version=version)
     create_groundtruth_database(
         dataset_name, root_path, info_prefix, f"{out_dir}/{info_prefix}_infos_train.pkl"
     )
@@ -87,24 +89,25 @@ def extended_nuscenes_data_prep(
         out_dir (str): Output directory of the groundtruth database info.
         max_prev_samples (int): Number of input consecutive frames. Default: 10
     """
-    extended_nuscenes_converter.create_nuscenes_infos(
-        root_path, info_prefix, version=version, max_prev_samples=max_prev_samples
-    )
+    # extended_nuscenes_converter.create_nuscenes_infos(
+    #     root_path, info_prefix, version=version, max_prev_samples=max_prev_samples
+    # )
 
-    if version == "v1.0-test":
-        return
+    # if version == "v1.0-test":
+    #     return
 
-    info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
-    info_val_path = osp.join(root_path, f"{info_prefix}_infos_val.pkl")
-    extended_nuscenes_converter.export_2d_annotation(
-        root_path, info_train_path, version=version
-    )
-    extended_nuscenes_converter.export_2d_annotation(
-        root_path, info_val_path, version=version
-    )
+    # info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
+    # info_val_path = osp.join(root_path, f"{info_prefix}_infos_val.pkl")
+    # extended_nuscenes_converter.export_2d_annotation(
+    #     root_path, info_train_path, version=version
+    # )
+    # extended_nuscenes_converter.export_2d_annotation(
+    #     root_path, info_val_path, version=version
+    # )
     create_groundtruth_database(
         dataset_name, root_path, info_prefix, f"{out_dir}/{info_prefix}_infos_train.pkl"
     )
+
 
 def carla_data_prep(root_path, info_prefix, version, dataset_name, out_dir, max_prev_samples=10):
     print("root =", root_path)
@@ -113,22 +116,15 @@ def carla_data_prep(root_path, info_prefix, version, dataset_name, out_dir, max_
     print("dataset_name", dataset_name)
     print("version", version)
     carla_data_converter.create_carla_infos(
-        root_path, info_prefix, version, max_prev_samples=max_prev_samples
+        root_path, info_prefix, max_prev_samples=max_prev_samples
     )
-    exit(0)
 
     info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
     info_val_path = osp.join(root_path, f"{info_prefix}_infos_val.pkl")
-    extended_nuscenes_converter.export_2d_annotation(
-        root_path, info_train_path, version=version
-    )
-    extended_nuscenes_converter.export_2d_annotation(
-        root_path, info_val_path, version=version
-    )
+
     create_groundtruth_database(
         dataset_name, root_path, info_prefix, f"{out_dir}/{info_prefix}_infos_train.pkl"
     )
-
 
 
 def lyft_data_prep(
@@ -163,8 +159,10 @@ def lyft_data_prep(
     info_train_path = osp.join(root_path, f"{train_info_name}.pkl")
     info_val_path = osp.join(root_path, f"{val_info_name}.pkl")
 
-    lyft_converter.export_2d_annotation(root_path, info_train_path, version=version)
-    lyft_converter.export_2d_annotation(root_path, info_val_path, version=version)
+    lyft_converter.export_2d_annotation(
+        root_path, info_train_path, version=version)
+    lyft_converter.export_2d_annotation(
+        root_path, info_val_path, version=version)
 
 
 def scannet_data_prep(root_path, info_prefix, out_dir, workers):
@@ -176,7 +174,8 @@ def scannet_data_prep(root_path, info_prefix, out_dir, workers):
         out_dir (str): Output directory of the generated info file.
         workers (int): Number of threads to be used.
     """
-    indoor.create_indoor_info_file(root_path, info_prefix, out_dir, workers=workers)
+    indoor.create_indoor_info_file(
+        root_path, info_prefix, out_dir, workers=workers)
 
 
 def sunrgbd_data_prep(root_path, info_prefix, out_dir, workers):
@@ -188,7 +187,8 @@ def sunrgbd_data_prep(root_path, info_prefix, out_dir, workers):
         out_dir (str): Output directory of the generated info file.
         workers (int): Number of threads to be used.
     """
-    indoor.create_indoor_info_file(root_path, info_prefix, out_dir, workers=workers)
+    indoor.create_indoor_info_file(
+        root_path, info_prefix, out_dir, workers=workers)
 
 
 def waymo_data_prep(root_path, info_prefix, version, out_dir, workers, max_sweeps=5):
@@ -200,7 +200,7 @@ def waymo_data_prep(root_path, info_prefix, version, out_dir, workers, max_sweep
         out_dir (str): Output directory of the generated info file.
         workers (int): Number of threads to be used.
         max_sweeps (int): Number of input consecutive frames. Default: 5 \
-            Here we store pose information of these frames for later use.
+            Here we stonuscenesre pose information of these frames for later use.
     """
     from tools.data_converter import waymo_converter as waymo
 
@@ -329,22 +329,6 @@ if __name__ == "__main__":
             info_prefix=args.extra_tag,
             version="train",
             dataset_name="CarlaDataset",
-            out_dir=args.out_dir,
-            max_prev_samples=args.max_sweeps,
-        )
-        carla_data_prep(
-            root_path=args.root_path,
-            info_prefix=args.extra_tag,
-            version="test",
-            dataset_name="ExtendedNuScenesDataset",
-            out_dir=args.out_dir,
-            max_prev_samples=args.max_sweeps,
-        )
-        carla_data_prep(
-            root_path=args.root_path,
-            info_prefix=args.extra_tag,
-            version="val",
-            dataset_name="ExtendedNuScenesDataset",
             out_dir=args.out_dir,
             max_prev_samples=args.max_sweeps,
         )
