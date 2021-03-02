@@ -123,13 +123,13 @@ def _fill_scene_infos(loader, max_prev_samples=10, lidar_name="lidar_top", ego_p
         gt_boxes = np.empty((len(annotations), 7))
         names = []
         for i, annotation in enumerate(annotations):
-            xyz_wlh_yaw = loading_utils.obb_to_xyz_sizes_yaw_vector(
-                annotation.transform, annotation.size)
+
+            xyz_wlh_yaw = annotation_to_lidar(
+                annotation, current_frame_info['ego_t_lidar'], current_frame_info['ego_R_lidar'], current_frame_info['global_t_ego'], current_frame_info['global_R_ego'])
 
             # we need to convert rot to SECOND format.
             # TODO source?
-            xyz_wlh_yaw[6] = -xyz_wlh_yaw[6] - np.pi / 2
-
+            # xyz_wlh_yaw[6] = -xyz_wlh_yaw[6] - np.pi / 2
             gt_boxes[i] = xyz_wlh_yaw
             category_name = category_token_to_name[annotation.category_token]
             names.append(category_name)
@@ -300,6 +300,26 @@ def _collect_sample_data_infos(sample, data_loader, max_prev_samples, lidar_name
         sample_infos[i] = prev
 
     return sample_infos
+
+
+def annotation_to_lidar(annotation, ego_t_lidar, ego_R_lidar, global_t_ego, global_R_ego):
+    ego_T_lidar = _transform_from_translation_rotation(
+        ego_t_lidar, ego_R_lidar)
+    global_T_ego = _transform_from_translation_rotation(
+        global_t_ego, global_R_ego)
+
+    global_T_annotation = np.asarray(annotation.transform)
+
+    global_T_lidar = np.dot(global_T_ego, ego_T_lidar)
+
+    lidar_T_annotation = np.dot(np.linalg.inv(
+        global_T_lidar), global_T_annotation)
+
+    # convert annotation to the framework format
+    xyz_lwh_yaw = loading_utils.obb_to_xyz_sizes_yaw_vector(
+        lidar_T_annotation, annotation.size)
+
+    return xyz_lwh_yaw
 
 
 def get_sensor_relative_to(ego_t_sensor_source, ego_R_sensor_source, ego_t_sensor_target, ego_R_sensor_target, world_t_ego_source, world_R_ego_source, world_t_ego_target, world_R_ego_target):
