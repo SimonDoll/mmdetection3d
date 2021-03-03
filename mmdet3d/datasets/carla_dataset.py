@@ -217,9 +217,9 @@ class CarlaDataset(Custom3DDataset):
 
         gt_bboxes_3d = info["gt_boxes"]
 
-        # for the moment add 0.0, 0.0 velocity to the boxes
+        # TODO for now we always add the velocity, maybe make switchable later
         # TODO critical!!!!
-        gt_velocity = np.zeros((len(gt_bboxes_3d), 2))
+        gt_velocity = info["gt_velocity"]
         gt_bboxes_3d = np.concatenate([gt_bboxes_3d, gt_velocity], axis=-1)
 
         gt_names_3d = info["gt_names"]
