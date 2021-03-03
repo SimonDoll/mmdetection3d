@@ -216,6 +216,12 @@ class CarlaDataset(Custom3DDataset):
         info = self.data_infos[index]
 
         gt_bboxes_3d = info["gt_boxes"]
+
+        # for the moment add 0.0, 0.0 velocity to the boxes
+        # TODO critical!!!!
+        gt_velocity = np.zeros((len(gt_bboxes_3d), 2))
+        gt_bboxes_3d = np.concatenate([gt_bboxes_3d, gt_velocity], axis=-1)
+
         gt_names_3d = info["gt_names"]
         gt_labels_3d = []
         for cat in gt_names_3d:
