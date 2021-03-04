@@ -1,13 +1,23 @@
-import mmcv
+from os import path as osp
+
+import torch
 import numpy as np
 import pyquaternion
 import tempfile
-from os import path as osp
 
+import mmcv
 from mmdet.datasets import DATASETS
 from ..core import show_result
 from ..core.bbox import Box3DMode, LiDARInstance3DBoxes
 from .custom_3d import Custom3DDataset
+
+from mmdet3d.core.evaluation.evaluation_3d.metrics import average_precision
+from mmdet3d.core.evaluation.evaluation_3d.matchers import GreedyMatcher
+from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import CenterDistance2d
+from mmdet3d.core.evaluation.evaluation_3d.metrics import AveragePrecision
+from mmdet3d.core.evaluation.evaluation_3d.metrics import MeanAveragePrecision
+from mmdet3d.core.evaluation.evaluation_3d.metrics import MetricPipeline
+from mmdet3d.core.evaluation.evaluation_3d.metrics.numeric_metric_result import NumericMetricResult
 
 
 @DATASETS.register_module()
@@ -75,6 +85,20 @@ class CarlaDataset(Custom3DDataset):
                 use_camera=False,
                 use_lidar=True,
             )
+
+        # setup the metric pipeline for evaluation
+        # we use class ids for matching, cat2id can be used to assign a category name later on
+        self.matcher = GreedyMatcher(self.cat2id.values())
+        # similarity_meassure = Iou()
+        self.similarity_meassure = CenterDistance2d()
+
+        avg_precision_metric = AveragePrecision(similarity_threshold=1)
+        mean_avg_precision_metric = MeanAveragePrecision(
+            {"start": 1 / 4, "stop": 1 / 0.5, "step": 0.5}
+        )
+        self.metric_pipeline = MetricPipeline(
+            [avg_precision_metric, mean_avg_precision_metric]
+        )
 
     def get_cat_ids(self, idx):
         """Get category distribution of single scene.
@@ -243,14 +267,6 @@ class CarlaDataset(Custom3DDataset):
         )
         return anns_results
 
-    def _evaluate_single(
-        self, result_path, logger=None, metric="bbox", result_name="pts_bbox"
-    ):
-        raise NotImplementedError
-
-    def format_results(self, results, jsonfile_prefix=None):
-        raise NotImplementedError
-
     def evaluate(
         self,
         results,
@@ -261,7 +277,60 @@ class CarlaDataset(Custom3DDataset):
         show=False,
         out_dir=None,
     ):
-        raise NotImplementedError
+        # the results are in the order of the data_infos, but do not contain annos as the eval hook
+        # for the carla datasets no "fixed test set exists".
+        # Therefore the boxes are available (different to nuscenes etc)
+        # ->  we load the annos from file (in the order of the predictions)
+
+        # print("data infos =", self.data_infos[0])
+        # collect the gt data
+        gt_annos = [self.get_ann_info(i) for i in range(len(results))]
+
+        matching_results = {c: [] for c in self.cat2id.values()}
+
+        for i, res in enumerate(results):
+            pred_boxes = res['pts_bbox']['boxes_3d']
+            pred_scores = res['pts_bbox']['scores_3d']
+            pred_labels = res['pts_bbox']['labels_3d']
+
+            gt_boxes = gt_annos[i]['gt_bboxes_3d']
+            gt_labels = gt_annos[i]['gt_labels_3d']
+
+            # gt labels are a numpy array -> bring to torch
+            gt_labels = torch.from_numpy(gt_labels)
+
+            # TODO load input data aswell
+            # calculate the similarity for the boxes
+            similarity_scores = self.similarity_meassure.calc_scores(
+                gt_boxes, pred_boxes, gt_labels, pred_labels
+            )
+
+            # match gt and predictions
+            single_matching_result = self.matcher.match(
+                similarity_scores,
+                gt_boxes,
+                pred_boxes,
+                gt_labels,
+                pred_labels,
+                pred_scores,
+                data_id=i,
+            )
+
+            # accumulate matching results of multiple frames/instances
+            for c in single_matching_result.keys():
+                matching_results[c].extend(single_matching_result[c])
+
+        # evaluate metrics on the results
+        metric_results = self.metric_pipeline.evaluate(
+            matching_results, data=None)
+
+        results_numeric = {}
+        # for now only collect single numeric  results
+        for metric_name, metric_return in metric_results.items():
+            if isinstance(metric_return, NumericMetricResult):
+                results_numeric[metric_name] = float(metric_return())
+
+        return results_numeric
 
     def show(self, results, out_dir):
         raise NotImplementedError
