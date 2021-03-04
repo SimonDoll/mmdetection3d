@@ -110,11 +110,6 @@ def extended_nuscenes_data_prep(
 
 
 def carla_data_prep(root_path, info_prefix, version, dataset_name, out_dir, max_prev_samples=10):
-    print("root =", root_path)
-    print("info prefix =", info_prefix)
-    print("out_dir", out_dir)
-    print("dataset_name", dataset_name)
-    print("version", version)
     carla_data_converter.create_carla_infos(
         root_path, info_prefix, max_prev_samples=max_prev_samples
     )
