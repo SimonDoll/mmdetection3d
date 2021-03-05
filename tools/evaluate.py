@@ -38,6 +38,7 @@ from mmdet3d.core.evaluation.evaluation_3d.matchers import GreedyMatcher
 
 
 class EvalPipeline:
+
     def __init__(self, args):
         self._init_cfg(args.config_file)
         self._init_processing(args)
@@ -48,7 +49,7 @@ class EvalPipeline:
         self.cfg = Config.fromfile(config_file)
 
         # set cudnn_benchmark
-        if self.cfg.get("cudnn_benchmark", False):
+        if self.cfg.get('cudnn_benchmark', False):
             torch.backends.cudnn.benchmark = True
 
         self.cfg.model.pretrained = None
@@ -57,7 +58,7 @@ class EvalPipeline:
     def _init_data(self):
         # build the dataloader
         # TODO right config (train / val / test?)
-        samples_per_gpu = self.cfg.data.custom_val.pop("samples_per_gpu", 1)
+        samples_per_gpu = self.cfg.data.custom_val.pop('samples_per_gpu', 1)
         dataset = build_dataset(self.cfg.data.custom_val)
         self.data_loader = build_dataloader(
             dataset,
@@ -71,7 +72,7 @@ class EvalPipeline:
         self.cat2id = dataset.cat2id
 
     def _init_model(self, checkpoint_file):
-        """Initializes the detector from the config and given checkpoint
+        """Initializes the detector from the config and given checkpoint.
 
         Args:
             checkpoint_file (str): Checkpoint file of trained model
@@ -79,16 +80,16 @@ class EvalPipeline:
         # TODO configs?
         self.model = build_detector(
             self.cfg.model, None, test_cfg=self.cfg.test_cfg)
-        fp16_cfg = self.cfg.get("fp16", None)
+        fp16_cfg = self.cfg.get('fp16', None)
         if fp16_cfg is not None:
             wrap_fp16_model(self.model)
         checkpoint = load_checkpoint(
-            self.model, checkpoint_file, map_location="cpu")
+            self.model, checkpoint_file, map_location='cpu')
         if args.fuse_conv_bn:
             self.model = fuse_module(self.model)
 
         # if problems with backward compatibility (see test.py of mmdetection3d for a fix)
-        self.model.CLASSES = checkpoint["meta"]["CLASSES"]
+        self.model.CLASSES = checkpoint['meta']['CLASSES']
 
     def _init_processing(self, args):
         """Sets up distributed processing
@@ -96,7 +97,7 @@ class EvalPipeline:
             args (Namespace): program options
         """
         # init distributed env first, since logger depends on the dist info.
-        if args.launcher == "none":
+        if args.launcher == 'none':
             self.distributed = False
         else:
             self.distributed = True
@@ -109,10 +110,11 @@ class EvalPipeline:
     def _single_gpu_eval(self):
         # TODO implement for non distributed models
         raise NotImplementedError(
-            "Run distributed with single gpu as argument")
+            'Run distributed with single gpu as argument')
 
     def _multi_gpu_eval(self, tmpdir=None):
         """Test model with multiple gpus.
+
         @see mmdet apis/test.py: multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False)
         Saves the results on different gpus to 'tmpdir'
         and collects them by the rank 0 worker.
@@ -138,21 +140,23 @@ class EvalPipeline:
         for i, data in enumerate(self.data_loader):
 
             # TODO remove
-            if i > 3:
-                break
+            # if i > 3:
+            #     break
 
             with torch.no_grad():
                 # TODO use data to get points in boxes etc.
                 # remove gt to use the regular test mode
-                gt_bboxes_3d = data.pop("gt_bboxes_3d").data
-                gt_labels_3d = data.pop("gt_labels_3d").data
+                gt_bboxes_3d = data.pop('gt_bboxes_3d').data
+                gt_labels_3d = data.pop('gt_labels_3d').data
 
-                gt_result = {"gt_bboxes_3d": gt_bboxes_3d,
-                             "gt_labels_3d": gt_labels_3d}
+                gt_result = {
+                    'gt_bboxes_3d': gt_bboxes_3d,
+                    'gt_labels_3d': gt_labels_3d
+                }
 
                 # test format needs an additional dimension
-                data["img_metas"] = [data["img_metas"]]
-                data["points"] = [data["points"]]
+                data['img_metas'] = [data['img_metas']]
+                data['points'] = [data['points']]
 
                 # predict
                 result = self.model(return_loss=False, rescale=True, **data)
@@ -163,22 +167,20 @@ class EvalPipeline:
 
                 # TODO check if this interface is the same for other models / datasets
                 # add gt information (pred is [{'pts_bbox : pts infos}])
-                result[0]["pts_bbox"].update(gt_result)
+                result[0]['pts_bbox'].update(gt_result)
 
                 # encode mask results
                 if isinstance(result[0], tuple):
                     # TODO is this needed for our models?
-                    result = [
-                        (bbox_results, encode_mask_results(mask_results))
-                        for bbox_results, mask_results in result
-                    ]
+                    result = [(bbox_results, encode_mask_results(mask_results))
+                              for bbox_results, mask_results in result]
 
             # clean the data a bit to make it easier to use in eval
             # TODO check for different models
-            data["points"] = data["points"][0].data[0][0]
+            data['points'] = data['points'][0].data[0][0]
 
             # store data and inference result
-            combined = {"data": data, "result": result}
+            combined = {'data': data, 'result': result}
             results.append(combined)
 
             if rank == 0:
@@ -201,21 +203,24 @@ class EvalPipeline:
         if tmpdir is None:
             MAX_LEN = 512
             # 32 is whitespace
-            dir_tensor = torch.full(
-                (MAX_LEN,), 32, dtype=torch.uint8, device="cuda")
+            dir_tensor = torch.full((MAX_LEN, ),
+                                    32,
+                                    dtype=torch.uint8,
+                                    device='cuda')
             if rank == 0:
-                mmcv.mkdir_or_exist(".dist_test")
-                tmpdir = tempfile.mkdtemp(dir=".dist_test")
+                mmcv.mkdir_or_exist('.dist_test')
+                tmpdir = tempfile.mkdtemp(dir='.dist_test')
                 tmpdir = torch.tensor(
-                    bytearray(tmpdir.encode()), dtype=torch.uint8, device="cuda"
-                )
-                dir_tensor[: len(tmpdir)] = tmpdir
+                    bytearray(tmpdir.encode()),
+                    dtype=torch.uint8,
+                    device='cuda')
+                dir_tensor[:len(tmpdir)] = tmpdir
             dist.broadcast(dir_tensor, 0)
             tmpdir = dir_tensor.cpu().numpy().tobytes().decode().rstrip()
         else:
             mmcv.mkdir_or_exist(tmpdir)
         # dump the part result to the dir
-        mmcv.dump(result_part, osp.join(tmpdir, f"part_{rank}.pkl"))
+        mmcv.dump(result_part, osp.join(tmpdir, f'part_{rank}.pkl'))
         dist.barrier()
         # collect all parts
         if rank != 0:
@@ -224,7 +229,7 @@ class EvalPipeline:
             # load results of all parts from tmp dir
             part_list = []
             for i in range(world_size):
-                part_file = osp.join(tmpdir, f"part_{i}.pkl")
+                part_file = osp.join(tmpdir, f'part_{i}.pkl')
                 part_list.append(mmcv.load(part_file))
             # sort the results
             ordered_results = []
@@ -242,6 +247,9 @@ class EvalPipeline:
         # similarity_meassure = Iou()
         similarity_meassure = CenterDistance2d()
 
+        # if centerpoint dist reverse matching order (lower is better)
+        reversed_score = True
+
         filter_range_interval = BoxDistanceIntervalFilter(
             box_range=[0, 0, 30, 30])
 
@@ -254,14 +262,13 @@ class EvalPipeline:
         matcher = GreedyMatcher(self.cat2id.values())
 
         # metrics
-        avg_precision_metric = AveragePrecision(similarity_threshold=1)
+        avg_precision_metric = AveragePrecision(
+            similarity_threshold=4, reversed_score=reversed_score)
         mean_avg_precision_metric = MeanAveragePrecision(
-            {"start": 1 / 4, "stop": 1 / 0.5, "step": 0.5}
-        )
+            [0.5, 1, 2, 4], reversed_score=reversed_score)
 
         metric_pipeline = MetricPipeline(
-            [avg_precision_metric, mean_avg_precision_metric]
-        )
+            [avg_precision_metric, mean_avg_precision_metric])
 
         matching_results = {c: [] for c in self.cat2id.values()}
 
@@ -269,32 +276,27 @@ class EvalPipeline:
             # TODO check if this result format holds for all models
 
             # get inference resutls and input data
-            input_data = res["data"]
-            inference_result = res["result"][0]
+            input_data = res['data']
+            inference_result = res['result'][0]
 
-            inference_result = inference_result["pts_bbox"]
+            inference_result = inference_result['pts_bbox']
 
-            pred_boxes = inference_result["boxes_3d"]
+            pred_boxes = inference_result['boxes_3d']
 
-            pred_labels = inference_result["labels_3d"]
-            pred_scores = inference_result["scores_3d"]
+            pred_labels = inference_result['labels_3d']
+            pred_scores = inference_result['scores_3d']
             # gt are wrapped in additional lists
             # TODO check reason
-            gt_boxes = inference_result["gt_bboxes_3d"][0][0]
-            gt_labels = inference_result["gt_labels_3d"][0][0]
+            gt_boxes = inference_result['gt_bboxes_3d'][0][0]
+            gt_labels = inference_result['gt_labels_3d'][0][0]
 
-            # # TODO bring all needed tensors to gpu
-            # input_data["points"] = input_data["points"].cuda()
-            # pred_boxes.tensor = pred_boxes.tensor.cuda()
-            # gt_boxes.tensor = gt_boxes.tensor.cuda()
-
-            # # TODO remove critical debug only
-            pred_boxes = gt_boxes
-            pred_labels = gt_labels
-            pred_scores = pred_scores[0: len(pred_labels)]
+            # TODO remove critical debug only
+            # pred_boxes = gt_boxes
+            # pred_labels = gt_labels
+            # pred_scores = pred_scores[0 : len(pred_labels)]
 
             # print("pred labels =", pred_labels)
-            print("gt labels =", gt_labels)
+            # print("gt labels =", gt_labels)
 
             # filter the boxes
             (
@@ -304,14 +306,12 @@ class EvalPipeline:
                 pred_labels,
                 pred_scores,
                 input_data,
-            ) = filter_pipeline.apply(
-                gt_boxes, pred_boxes, gt_labels, pred_labels, pred_scores, input_data
-            )
+            ) = filter_pipeline.apply(gt_boxes, pred_boxes, gt_labels,
+                                      pred_labels, pred_scores, input_data)
 
             # calculate the similarity for the boxes
             similarity_scores = similarity_meassure.calc_scores(
-                gt_boxes, pred_boxes, gt_labels, pred_labels
-            )
+                gt_boxes, pred_boxes, gt_labels, pred_labels)
 
             # match gt and predictions
             single_matching_result = matcher.match(
@@ -322,6 +322,7 @@ class EvalPipeline:
                 pred_labels,
                 pred_scores,
                 data_id,
+                reversed_score=reversed_score,
             )
 
             # accumulate matching results of multiple frames/instances
@@ -334,23 +335,116 @@ class EvalPipeline:
         metric_pipeline.print_results(metric_results)
 
         end = datetime.datetime.now()
-        print("runtime eval millis =", (end - start).total_seconds() * 1000)
+        print('runtime eval millis =', (end - start).total_seconds() * 1000)
+
+    def compute_metrics2(self, inference_results):
+        start = datetime.datetime.now()
+
+        # similarity_meassure = Iou()
+        similarity_measure = CenterDistance2d()
+
+        # if centerpoint dist reverse matching order (lower is better)
+        reversed_score = True
+
+        filter_points_in_box = MinPointsInGtFilter()
+
+        filter_pipeline = FilterPipeline([filter_points_in_box])
+
+        matcher = GreedyMatcher(self.cat2id.values())
+
+        similarity_threshold = 4
+        # metrics
+        avg_precision_metric = AveragePrecision(
+            similarity_threshold=similarity_threshold,
+            reversed_score=reversed_score)
+
+        precision_per_class = PrecisionPerClass(
+            similarity_threshold=similarity_threshold,
+            reversed_score=reversed_score)
+
+        recall_per_class = RecallPerClass(
+            similarity_threshold=similarity_threshold,
+            reversed_score=reversed_score)
+
+        mean_avg_precision_metric = MeanAveragePrecision(
+            [0.5, 1, 2, 4], reversed_score=reversed_score)
+
+        precision = Precision(similarity_threshold, reversed_score)
+        recall = Recall(similarity_threshold, reversed_score)
+
+        metric_pipeline = MetricPipeline([
+            avg_precision_metric, precision_per_class, recall_per_class,
+            mean_avg_precision_metric, precision, recall
+        ])
+
+        inference_results_preprocessed = []
+
+        for data_id, res in enumerate(tqdm.tqdm(inference_results)):
+            # TODO check if this result format holds for all models
+
+            # get inference resutls and input data
+            input_data = res['data']
+            inference_result = res['result'][0]
+
+            inference_result = inference_result['pts_bbox']
+
+            pred_boxes = inference_result['boxes_3d']
+
+            pred_labels = inference_result['labels_3d']
+            pred_scores = inference_result['scores_3d']
+            # gt are wrapped in additional lists
+            # TODO check reason
+            gt_boxes = inference_result['gt_bboxes_3d'][0][0]
+            gt_labels = inference_result['gt_labels_3d'][0][0]
+
+            res_preprocessed = {
+                'input_data': input_data,
+                'gt_boxes': gt_boxes,
+                'pred_boxes': pred_boxes,
+                'gt_labels': gt_labels,
+                'pred_labels': pred_labels,
+                'pred_scores': pred_scores,
+            }
+            inference_results_preprocessed.append(res_preprocessed)
+
+        multi_distance_metric = MultiDistanceMetric(
+            self.cat2id.values(),
+            metric_pipeline,
+            distance_intervals=[0, 10, 20, 30],
+            similarity_measure=similarity_measure,
+            reversed_score=reversed_score,
+            matcher=matcher,
+            additional_filter_pipeline=filter_pipeline,
+        )
+
+        distance_interval_results = multi_distance_metric.evaluate(
+            inference_results_preprocessed)
+
+        MultiDistanceMetric.print_results(distance_interval_results,
+                                          '/workspace/work_dirs/plots')
+
+        # for dist in distance_interval_results:
+        #     print("interval =", dist["min_dist"], ",", dist["max_dist"])
+        #     print("gt =", dist["gt_count"], ", pred =", dist["pred_count"])
+        #     # print("res =", dist["results"])
+        #     MetricPipeline.print_results(dist["results"])
+
+        end = datetime.datetime.now()
+        print('runtime eval millis =', (end - start).total_seconds() * 1000)
 
     def run_eval(self, tmpdir=None):
-        """Runs inference on the validation dataset specified by the model
-           and computes metrics.
+        """Runs inference on the validation dataset specified by the model and
+        computes metrics.
 
         Args:
             tmpdir (str, optional): Folder to save intermediate results to (mainly for debugging). Defaults to None.
         """
         if not self.distributed:
-            # self.model = MMDataParallel(self.model, device_ids=[0])
-            # results = self._single_gpu_eval(
-            #     self.model, data_loader, args.show, args.show_dir
-            # )
-            raise NotImplementedError
+            self.model = MMDataParallel(self.model, device_ids=[0])
+            results = self._single_gpu_eval(self.model, self.data_loader,
+                                            args.show, args.show_dir)
         else:
-            print("distributed eval")
+            print('distributed eval')
             self.model = MMDistributedDataParallel(
                 self.model.cuda(),
                 device_ids=[torch.cuda.current_device()],
@@ -358,28 +452,17 @@ class EvalPipeline:
             )
             results = self._multi_gpu_eval(tmpdir)
 
-            # TODO remove
-            # path = "/workspace/work_dirs/results.pickle"
-            # # with open(path, "wb") as handle:
-            # #     pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
-            # # # exit(0)
-
-            # with open(path, "rb") as input_file:
-            #     results = pickle.load(input_file)
-
-            # END REMOVE
-
-            self.compute_metrics(results)
+            self.compute_metrics2(results)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        "Custom non dataset dependent eval pipeline")
+        'Custom non dataset dependent eval pipeline')
 
-    parser.add_argument("config_file", type=str,
-                        help="Model configuration (test?)")
-    parser.add_argument("checkpoint_file", type=str,
-                        help="Trained model checkpoint")
+    parser.add_argument(
+        'config_file', type=str, help='Model configuration (test?)')
+    parser.add_argument(
+        'checkpoint_file', type=str, help='Trained model checkpoint')
 
     # TODO output folder
     # parser.add_argument('--out', help='output result file in pickle format')
@@ -388,10 +471,10 @@ if __name__ == "__main__":
     # MMDETECTION3D test arguments
     # --------------------------------
     parser.add_argument(
-        "--fuse-conv-bn",
-        action="store_true",
-        help="Whether to fuse conv and bn, this will slightly increase"
-        "the inference speed",
+        '--fuse-conv-bn',
+        action='store_true',
+        help='Whether to fuse conv and bn, this will slightly increase'
+        'the inference speed',
     )
 
     # TODO visualization
@@ -408,25 +491,25 @@ if __name__ == "__main__":
     #     '--tmpdir',
     #     help='tmp directory used for collecting results from multiple '
     #     'workers, available when gpu_collect is not specified')
-    parser.add_argument("--seed", type=int, default=0, help="random seed")
+    parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument(
-        "--deterministic",
-        action="store_true",
-        help="whether to set deterministic options for CUDNN backend.",
+        '--deterministic',
+        action='store_true',
+        help='whether to set deterministic options for CUDNN backend.',
     )
 
     # TODO adapt?
     parser.add_argument(
-        "--launcher",
-        choices=["none", "pytorch", "slurm", "mpi"],
-        default="none",
-        help="job launcher",
+        '--launcher',
+        choices=['none', 'pytorch', 'slurm', 'mpi'],
+        default='none',
+        help='job launcher',
     )
-    parser.add_argument("--local_rank", type=int, default=0)
+    parser.add_argument('--local_rank', type=int, default=0)
 
     args = parser.parse_args()
-    if "LOCAL_RANK" not in os.environ:
-        os.environ["LOCAL_RANK"] = str(args.local_rank)
+    if 'LOCAL_RANK' not in os.environ:
+        os.environ['LOCAL_RANK'] = str(args.local_rank)
 
     eval_pipeline = EvalPipeline(args)
     eval_pipeline.run_eval()

@@ -1,4 +1,5 @@
 from os import path as osp
+from mmdet3d.core.evaluation.evaluation_3d.metrics.recall import Recall
 
 import torch
 import numpy as np
@@ -91,14 +92,17 @@ class CarlaDataset(Custom3DDataset):
         self.matcher = GreedyMatcher(self.cat2id.values())
         # similarity_meassure = Iou()
         self.similarity_meassure = CenterDistance2d()
+        # if centerpoint dist reverse matching order (lower is better)
+        self.similarity_reversed_score = True
 
-        avg_precision_metric = AveragePrecision(similarity_threshold=1)
+        # metrics
+        avg_precision_metric = AveragePrecision(
+            similarity_threshold=0.3, reversed_score=self.similarity_reversed_score)
         mean_avg_precision_metric = MeanAveragePrecision(
-            {"start": 1 / 4, "stop": 1 / 0.5, "step": 0.5}
-        )
+            [0.5, 1, 2, 4], reversed_score=self.similarity_reversed_score)
+
         self.metric_pipeline = MetricPipeline(
-            [avg_precision_metric, mean_avg_precision_metric]
-        )
+            [avg_precision_metric, mean_avg_precision_metric])
 
     def get_cat_ids(self, idx):
         """Get category distribution of single scene.
@@ -242,7 +246,6 @@ class CarlaDataset(Custom3DDataset):
         gt_bboxes_3d = info["gt_boxes"]
 
         # TODO for now we always add the velocity, maybe make switchable later
-        # TODO critical!!!!
         gt_velocity = info["gt_velocity"]
         gt_bboxes_3d = np.concatenate([gt_bboxes_3d, gt_velocity], axis=-1)
 
@@ -313,9 +316,9 @@ class CarlaDataset(Custom3DDataset):
                 gt_labels,
                 pred_labels,
                 pred_scores,
-                data_id=i,
+                i,
+                reversed_score=self.similarity_reversed_score,
             )
-
             # accumulate matching results of multiple frames/instances
             for c in single_matching_result.keys():
                 matching_results[c].extend(single_matching_result[c])
