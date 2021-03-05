@@ -5,13 +5,16 @@ from .plottable_2d_metric_result import Plottable2dMetricResult
 
 
 class Plottable2dMetric(Basemetric):
-    """This class serves as interfaces for metrics that return a numeric value."""
+    """This class serves as interfaces for metrics that return a numeric
+    value."""
 
-    def __init__(self, num_classes):
-        self._num_classes = num_classes
+    def __init__(self, similarity_threshold=0.5, reversed_score=False):
+        super().__init__(
+            similarity_threshold=similarity_threshold,
+            reversed_score=reversed_score)
 
     def __str__(self):
-        return "NumericMetric (Abstract)"
+        return 'NumericMetric (Abstract)'
 
     @abstractmethod
     def evaluate(self, matching_results, data=None):
@@ -20,15 +23,13 @@ class Plottable2dMetric(Basemetric):
         NumericMetric is used for all metrics that return numeric values as result
         """
         raise NotImplementedError(
-            "this method needs to be implemented from child class"
-        )
+            'this method needs to be implemented from child class')
 
     @staticmethod
     def result_helper(x_name, xs, y_name, ys):
-        return {"x": xs, "y": ys, "x_name": x_name, "y_name": y_name}
+        return {'x': xs, 'y': ys, 'x_name': x_name, 'y_name': y_name}
 
     @staticmethod
     def create_result(result):
-        return Plottable2dMetricResult(
-            result["x"], result["y"], result["x_name"], result["y_name"]
-        )
+        return Plottable2dMetricResult(result['x'], result['y'],
+                                       result['x_name'], result['y_name'])

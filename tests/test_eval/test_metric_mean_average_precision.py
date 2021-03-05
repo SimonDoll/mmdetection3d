@@ -1,8 +1,10 @@
-import torch
-import numpy as np
 import copy
-from mmdet3d.core.evaluation.evaluation_3d.metrics import MeanAveragePrecision
-from mmdet3d.core.evaluation.evaluation_3d.metrics import AveragePrecision
+import numpy as np
+import torch
+
+from mmdet3d.core.evaluation.evaluation_3d.metrics import (AveragePrecision,
+                                                           MeanAveragePrecision
+                                                           )
 
 
 class TestMetricAveragePrecision:
@@ -11,21 +13,29 @@ class TestMetricAveragePrecision:
         # this test should be implemented by all metrics
         # assures that the original matching results are not changed (permutation of results is fine)
         class_id = '0'
-        matching_results = {class_id:
-                            [
-                                {'similarity_score': 0.9,
-                                    'gt_box': True, 'pred_score': 0.5},
-                                {'similarity_score': 1,
-                                    'gt_box':  True, 'pred_score': 0.7},
-                                {'similarity_score': 0.7,
-                                    'gt_box': True, 'pred_score': 0.1},
-                            ]
-                            }
+        matching_results = {
+            class_id: [
+                {
+                    'similarity_score': 0.9,
+                    'gt_box': True,
+                    'pred_score': 0.5
+                },
+                {
+                    'similarity_score': 1,
+                    'gt_box': True,
+                    'pred_score': 0.7
+                },
+                {
+                    'similarity_score': 0.7,
+                    'gt_box': True,
+                    'pred_score': 0.1
+                },
+            ]
+        }
 
         match_copy = copy.deepcopy(matching_results)
 
-        metric = MeanAveragePrecision(
-            similarities={'start': 0.5, 'stop': 0.5, 'step': 0.1})
+        metric = MeanAveragePrecision(similarities=[0.5])
         metric.evaluate(matching_results)
 
         for class_id in matching_results.keys():
@@ -34,7 +44,7 @@ class TestMetricAveragePrecision:
             real_res = matching_results[class_id]
             copy_res = matching_results[class_id]
 
-            assert(len(real_res) == len(copy_res))
+            assert len(real_res) == len(copy_res)
 
             for i in range(len(real_res)):
                 real_res_dict = real_res[i]
@@ -43,19 +53,32 @@ class TestMetricAveragePrecision:
 
     def test_single_class_high_confidence(self):
         class_id = '0'
-        matching_results = {class_id:
-                            [
-                                {'similarity_score': 0.9,
-                                    'gt_box': True, 'pred_score': 0.5},
-                                {'similarity_score': 1,
-                                    'gt_box':  True, 'pred_score': 0.7},
-                                {'similarity_score': 0.7,
-                                    'gt_box': True, 'pred_score': 0.1},
-                            ]
-                            }
+        matching_results = {
+            class_id: [
+                {
+                    'similarity_score': 0.9,
+                    'gt_box': True,
+                    'pred_score': 0.5
+                },
+                {
+                    'similarity_score': 1,
+                    'gt_box': True,
+                    'pred_score': 0.7
+                },
+                {
+                    'similarity_score': 0.7,
+                    'gt_box': True,
+                    'pred_score': 0.1
+                },
+            ]
+        }
         # all boxes will be tps at each iteration -> res should be same as ap (as we have only a single class)
-        m_ap_metric = MeanAveragePrecision(
-            {'start': 0.5, 'stop':  0.6, 'step': 0.01})
+        similarities = np.arange(
+            0.5,
+            0.7,
+            0.01,
+        )
+        m_ap_metric = MeanAveragePrecision(similarities)
         m_ap = m_ap_metric.evaluate(matching_results)()
 
         ap_metric = AveragePrecision()
@@ -72,10 +95,21 @@ class TestMetricAveragePrecision:
         # matching results only need to have similarity_scores for similarity, gt_boxes (none for not set) and a confidence score (make all boxes highly confident)
         matching_results = {
             class_id: [  # tp, fp, fn
-                {"similarity_score": 0.7, "gt_box": True, "pred_score": 1.0},
-                {"similarity_score": 0.5, "gt_box": None, "pred_score": 1.0},
-                {"similarity_score": float(
-                    "-inf"), "gt_box": True, "pred_score": 1.0},
+                {
+                    'similarity_score': 0.7,
+                    'gt_box': True,
+                    'pred_score': 1.0
+                },
+                {
+                    'similarity_score': 0.5,
+                    'gt_box': None,
+                    'pred_score': 1.0
+                },
+                {
+                    'similarity_score': float('-inf'),
+                    'gt_box': True,
+                    'pred_score': 1.0
+                },
             ]
         }
         return matching_results, class_id
@@ -86,23 +120,24 @@ class TestMetricAveragePrecision:
         start = 0.1
         stop = 0.9
         step = 0.1
-        m_ap_metric = MeanAveragePrecision(
-            similarities={"start": start, "stop": stop, "step": step}
-        )
 
-        ap_metric = AveragePrecision(similarity_threshold=start)
+        similarities = np.arange(
+            0.1,
+            0.9,
+            0.1,
+        )
+        m_ap_metric = MeanAveragePrecision(similarities=similarities)
+
+        ap_metric = AveragePrecision(similarity_threshold=[0])
         m_ap = m_ap_metric.evaluate(matchings, data=None)()
 
         ap_list = []
 
         # do the mean by hand
-        similarities = np.arange(start, stop, step)
-        similarities = np.concatenate((similarities, np.asarray([stop])))
-
         for i, similarity in enumerate(similarities):
             ap_metric.similarity_threshold = similarity
-            ap = ap_metric.evaluate(matchings)
-            ap = ap()[class_id]()
+            ap = ap_metric.evaluate(matchings)()
+            ap = ap[class_id]()
 
             ap_sum = 0
             classes = 0

@@ -1,9 +1,10 @@
 import torch
+
 from .similarity_measure import SimilarityMeasure
 
 
 class CenterDistance2d(SimilarityMeasure):
-    """Similarity based on 2d distance of box centers"""
+    """Similarity based on 2d distance of box centers."""
 
     EPSILON = torch.finfo(torch.float32).eps
 
@@ -18,15 +19,12 @@ class CenterDistance2d(SimilarityMeasure):
 
         # pred x gt x 2
         pred_all_gts = gt_centers_2d.expand(
-            (len(pred_centers_2d), gt_centers_2d.shape[0], gt_centers_2d.shape[1])
-        )
+            (len(pred_centers_2d), gt_centers_2d.shape[0],
+             gt_centers_2d.shape[1]))
 
         pred_centers_2d = torch.unsqueeze(pred_centers_2d, 1)
         center_vectors = pred_centers_2d - pred_all_gts
 
         center_distances = torch.norm(center_vectors, dim=2)
-
-        # invert scores (max score should be the best)
-        center_distances = 1 / center_distances + self.EPSILON
 
         return center_distances

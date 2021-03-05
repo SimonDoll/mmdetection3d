@@ -1,57 +1,50 @@
-import torch
 import numpy as np
+import torch
 
-from .numeric_metric import NumericMetric
 from .average_precision import AveragePrecision
+from .numeric_metric import NumericMetric
 
 
 class MeanAveragePrecision(NumericMetric):
-    def __init__(self, similarities={"start": 0.5, "stop": 0.95, "step": 0.05}):
+
+    def __init__(self, similarities=[0.5, 0.6, 0.7], reversed_score=False):
         """Creates the MAP metric.
 
         Args:
-            similarities (dict, optional): Start, Stop and Steps of similarity iteration. Stop is included in calculations. Defaults to {'start': 0.5, 'stop': 0.95, 'step': 0.05}.
+            similarities (list, optional) list of similarity thresholds to use in calculations. Defaults to [0.5, 0.6, 0.7].
         """
-
-        assert similarities["start"] >= 0
-        assert similarities["start"] <= similarities["stop"]
+        assert isinstance(similarities, list) or isinstance(
+            similarities, np.ndarray), similarities
 
         self._similarities = similarities
 
+        # TODO we indicate the absence of a single similarity threshold  by setting it to None
+        super().__init__(
+            similarity_threshold=None, reversed_score=reversed_score)
+
     def __str__(self):
-        return "MeanAveragePrecision"
+        return 'MeanAveragePrecision'
 
     @property
     def similarities(self):
         return self._similarities
 
     def evaluate(self, matching_results, data=None):
-        if self._similarities["start"] == self._similarities["stop"]:
-            similarity_vals = np.asarray([self._similarities["start"]])
-        else:
-            similarity_vals = np.arange(
-                self._similarities["start"],
-                self._similarities["stop"],
-                self._similarities["step"],
-            )
-            # add stop value as well
-            similarity_vals = np.concatenate(
-                (similarity_vals, [self._similarities["stop"]])
-            )
 
-        average_precisions = np.zeros((len(similarity_vals)))
-        ap_metric = AveragePrecision(similarity_vals[0])
+        average_precisions = np.zeros((len(self._similarities)))
+        ap_metric = AveragePrecision(
+            self._similarities[0], reversed_score=self.reversed_score)
 
         # check wether the matching_results at least one box (pred or gt)
         has_detections = False
-        for i, similarity in enumerate(similarity_vals):
+        for i, similarity in enumerate(self._similarities):
             ap_metric.similarity_threshold = similarity
             # compute the average precision for this similarity
             average_precision_classes = ap_metric.compute(matching_results)
 
             ap_sum = 0
             ap_classes = 0
-            for class_id, ap in average_precision_classes.items():
+            for _, ap in average_precision_classes.items():
                 if ap is not None:
                     # the class was present
                     ap_sum += ap
@@ -63,7 +56,7 @@ class MeanAveragePrecision(NumericMetric):
 
         # if no boxes present return none
         if not has_detections:
-            return self.create_result(float("-inf"))
+            return self.create_result(float('nan'))
         else:
             # get the mean over all similarities
             # and return it as python scalar

@@ -1,5 +1,4 @@
 import warnings
-
 from beautifultable import BeautifulTable
 
 from .base_metric import Basemetric
@@ -8,11 +7,12 @@ from .numeric_metric_result import NumericMetricResult
 
 
 class MetricPipeline:
+
     def __init__(self, metric_objects):
         self._metric_objects = metric_objects
 
     def __str__(self):
-        return "MetricPipeline"
+        return 'MetricPipeline'
 
     def evaluate(self, matching_results, data=None):
         # TODO split in class and numeric metrics
@@ -52,19 +52,17 @@ class MetricPipeline:
                     class_results_numeric[metric_name][class_name] = value
             else:
                 warnings.warn(
-                    "The following metrics result is of an unprintable type and therefore ignored: {}".format(
-                        metric_name
-                    )
-                )
+                    'The following metrics result is of an unprintable type and therefore ignored: {}'
+                    .format(metric_name))
         # print the numeric results first
         numeric_table = BeautifulTable()
-        numeric_table.header = ["Metric", "Value"]
+        numeric_table.header = ['Metric', 'Value']
         for metric_name, numeric_result in results_numeric.items():
             numeric_table.rows.append([metric_name, numeric_result])
 
-        print("=" * 40)
-        print("Evaluation results")
-        print("=" * 40)
+        print('=' * 40)
+        print('Evaluation results')
+        print('=' * 40)
         print(numeric_table)
 
         numeric_per_class_table = BeautifulTable()
@@ -87,6 +85,6 @@ class MetricPipeline:
             numeric_per_class_table.rows.append(row)
 
         header = list(map(str, header))
-        numeric_per_class_table.header = ["Metric"] + header
+        numeric_per_class_table.header = ['Metric'] + header
 
         print(numeric_per_class_table)

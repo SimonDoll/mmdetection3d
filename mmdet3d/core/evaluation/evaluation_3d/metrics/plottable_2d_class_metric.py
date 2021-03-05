@@ -1,14 +1,17 @@
 from abc import ABC, abstractmethod
 
 from .class_metric import ClassMetric
-from .plottable_2d_metric_result import Plottable2dMetricResult
 from .plottable_2d_class_metric_result import Plottable2dClassMetricResult
 from .plottable_2d_metric import Plottable2dMetric
+from .plottable_2d_metric_result import Plottable2dMetricResult
 
 
 class Plottable2dClassMetric(ClassMetric):
-    def __init__(self, num_classes):
-        super.__init__(num_classes)
+
+    def __init__(self, similarity_threshold=0.5, reversed_score=False):
+        super().__init__(
+            similarity_threshold=similarity_threshold,
+            reversed_score=reversed_score)
 
     @abstractmethod
     def evaluate(self, matching_results, data=None):
@@ -19,8 +22,7 @@ class Plottable2dClassMetric(ClassMetric):
 
         """
         raise NotImplementedError(
-            "this method needs to be implemented from child class"
-        )
+            'this method needs to be implemented from child class')
 
     @staticmethod
     def result_helper(x_name, y_name, x_dict, y_dict):
@@ -30,8 +32,9 @@ class Plottable2dClassMetric(ClassMetric):
             x_vals = x_dict[class_name]
             y_vals = y_dict[class_name]
 
-            result[class_name] = Plottable2dMetricResult(x_name, x_vals, y_name, y_vals)
-        return self.create_result(result)
+            result[class_name] = Plottable2dMetricResult(
+                x_name, x_vals, y_name, y_vals)
+        return Plottable2dClassMetricResult.create_result(result)
 
     @staticmethod
     def create_result(result):

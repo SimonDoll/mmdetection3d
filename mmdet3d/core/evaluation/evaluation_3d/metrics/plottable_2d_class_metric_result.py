@@ -3,6 +3,9 @@ from .plottable_2d_metric_result import Plottable2dMetricResult
 
 
 class Plottable2dClassMetricResult(MetricResult):
+    """Interface for metric results that should be plotted in 2d on a per class
+    basis."""
+
     def __init__(self, result):
         assert isinstance(result, dict)
 

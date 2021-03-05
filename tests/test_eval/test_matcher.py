@@ -1,7 +1,7 @@
-import torch
 import numpy as np
-from mmdet3d.core.bbox import LiDARInstance3DBoxes
+import torch
 
+from mmdet3d.core.bbox import LiDARInstance3DBoxes
 from mmdet3d.core.evaluation.evaluation_3d.matchers import *
 from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import *
 
@@ -21,11 +21,10 @@ class TestMatchers:
         gt_boxes = torch.stack((gt_box_matched, gt_box_unmatched))
 
         gt_boxes = LiDARInstance3DBoxes(gt_boxes)
-        return gt_boxes, torch.tensor([gt_box_matched_label, gt_box_unmatched_label])
+        return gt_boxes, torch.tensor(
+            [gt_box_matched_label, gt_box_unmatched_label])
 
-    def create_pred_boxes(
-        self,
-    ):
+    def create_pred_boxes(self, ):
         pred_a_label = self.CLASSES[0]
         pred_b_label = self.CLASSES[1]
         pred_c_label = self.CLASSES[0]
@@ -48,9 +47,7 @@ class TestMatchers:
         pred_boxes = LiDARInstance3DBoxes(pred_boxes)
         return pred_boxes, pred_labels, pred_scores
 
-    def test_greedy_matcher_with_boxes(
-        self,
-    ):
+    def test_greedy_matcher_with_boxes(self, ):
 
         gt_boxes, gt_labels = self.create_gt_boxes()
         pred_boxes, pred_labels, pred_scores = self.create_pred_boxes()
@@ -59,8 +56,7 @@ class TestMatchers:
         matcher = GreedyMatcher(self.CLASSES)
 
         similarity_scores = similarity_measure.calc_scores(
-            gt_boxes, pred_boxes, gt_labels, pred_labels
-        )
+            gt_boxes, pred_boxes, gt_labels, pred_labels)
         matching_results = matcher.match(
             similarity_scores,
             gt_boxes,
@@ -86,24 +82,24 @@ class TestMatchers:
 
         for match in res_class_0:
             # case for true positive
-            if torch.all(match["pred_box"].tensor == pred_boxes[0].tensor):
-                assert torch.all(match["gt_box"].tensor == gt_boxes[0].tensor)
-                assert match["similarity_score"] >= 0.8
+            if torch.all(match['pred_box'].tensor == pred_boxes[0].tensor):
+                assert torch.all(match['gt_box'].tensor == gt_boxes[0].tensor)
+                assert match['similarity_score'] >= 0.8
 
             # case of false positive
-            elif torch.all(match["pred_box"].tensor == pred_boxes[2].tensor):
-                assert match["gt_box"] == None
-                assert match["similarity_score"] == float("-inf")
+            elif torch.all(match['pred_box'].tensor == pred_boxes[2].tensor):
+                assert match['gt_box'] == None
+                assert match['similarity_score'] == float('-inf')
             else:
 
-                assert False, "wrong box in pred matches"
+                assert False, 'wrong box in pred matches'
 
         match = res_class_1[0]
 
         # case of match but without overlap
-        assert torch.allclose(match["pred_box"].tensor, pred_boxes[1].tensor)
-        assert torch.allclose(match["gt_box"].tensor, gt_boxes[1].tensor)
-        assert np.isclose(match["similarity_score"], 0.0)
+        assert torch.allclose(match['pred_box'].tensor, pred_boxes[1].tensor)
+        assert torch.allclose(match['gt_box'].tensor, gt_boxes[1].tensor)
+        assert np.isclose(match['similarity_score'], 0.0)
 
     def test_greedy_matcher_without_boxes(self):
         similarity_measure = Iou()
@@ -121,8 +117,7 @@ class TestMatchers:
         pred_scores = torch.tensor([], dtype=torch.float)
 
         similarity_scores = similarity_measure.calc_scores(
-            gt_boxes, pred_boxes, gt_labels, pred_labels
-        )
+            gt_boxes, pred_boxes, gt_labels, pred_labels)
 
         matching_results = matcher.match(
             similarity_scores,

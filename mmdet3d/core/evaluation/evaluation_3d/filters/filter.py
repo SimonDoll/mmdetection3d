@@ -1,20 +1,20 @@
-from abc import ABC, abstractmethod
-
 import torch
+from abc import ABC, abstractmethod
 
 
 class Filter:
     """This class serves as interfaces for evaluation filters.
-    The filter selects a subset of gt_boxes, pred_boxes and corresponding labels based on some conditions e.g. min number of points per box
+
+    The filter selects a subset of gt_boxes, pred_boxes and corresponding
+    labels based on some conditions e.g. min number of points per box
     """
 
     def __init__(self):
         pass
 
     @abstractmethod
-    def apply(
-        self, gt_boxes, pred_boxes, gt_labels, pred_labels, pred_scores, input_data
-    ):
+    def apply(self, gt_boxes, pred_boxes, gt_labels, pred_labels, pred_scores,
+              input_data):
         """
         Filters the boxes and returns only the ones matching the filter condition
         Args:
@@ -26,8 +26,7 @@ class Filter:
             input_data (dict): Input to model
         """
         raise NotImplementedError(
-            "this method needs to be implemented from child class"
-        )
+            'this method needs to be implemented from child class')
 
     def _apply_box_mask(
         self,
@@ -39,7 +38,7 @@ class Filter:
         pred_labels,
         pred_scores,
     ):
-        """Returns only the boxes that are specified in mask
+        """Returns only the boxes that are specified in mask.
 
         Args:
             gt_condition ([type]): [description]
@@ -57,4 +56,10 @@ class Filter:
         pred_labels_filtered = pred_labels[pred_mask]
         pred_scores_filtered = pred_scores[pred_mask]
 
-        return gt_boxes, pred_boxes, gt_labels, pred_labels, pred_scores
+        return (
+            gt_boxes_filtered,
+            pred_boxes_filtered,
+            gt_labels_filtered,
+            pred_labels_filtered,
+            pred_scores_filtered,
+        )

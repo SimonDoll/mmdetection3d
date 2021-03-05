@@ -4,9 +4,8 @@ from .matcher import Matcher
 
 
 class GreedyMatcher(Matcher):
-    """
-    Greedy matching is based on using the best pred box for the current gt box.
-    """
+    """Greedy matching is based on using the best pred box for the current gt
+    box."""
 
     def __init__(self, classes):
         super().__init__(classes)
@@ -20,13 +19,14 @@ class GreedyMatcher(Matcher):
         pred_labels,
         pred_scores,
         data_id,
+        reversed_score=False,
     ):
-        """[summary]
+        """Matches the gt boxes and the predictions.
 
         Args:
-            similarity_scores ([type]): [description]
-            gt_labels ([type]): [description]
-            pred_labels ([type]): [description]
+            similarity_scores (torch.tensor): pred x gt similarities between all boxes
+            gt_labels (torch.tensor): gt box labels
+            pred_labels (toch.tensor): pred box labels
         """
 
         result = {c: [] for c in self.classes}
@@ -40,9 +40,6 @@ class GreedyMatcher(Matcher):
 
         similarity_scores = similarity_scores[pred_idxs]
 
-        # print("pred labels =", pred_labels)
-        # print("gt labels =", gt_labels)
-
         for c in self.classes:
 
             pred_class_mask = pred_labels == c
@@ -53,8 +50,8 @@ class GreedyMatcher(Matcher):
             # get pred_idxs of class
             pred_idxs_class = torch.nonzero(pred_class_mask, as_tuple=True)[0]
 
+            # no need to filter the pred_labels / gt_labels as we know the class in the loop already
             pred_boxes_filtered = pred_boxes[pred_class_mask]
-            pred_labels_filtered = pred_labels[pred_idxs_class]
             pred_scores_filtered = pred_scores[pred_idxs_class]
 
             # the same for ground truth
@@ -65,12 +62,12 @@ class GreedyMatcher(Matcher):
             gt_idxs_class = torch.nonzero(gt_class_mask, as_tuple=True)[0]
 
             gt_boxes_filtered = gt_boxes[gt_class_mask]
-            gt_labels_filtered = gt_labels[gt_idxs_class]
 
             # make a copy of the scores as we modify them
             # remove preds of wrong classes
             # shape preds of class x gt_boxes
-            similarity_filtered = similarity_scores[pred_idxs_class].detach().clone()
+            similarity_filtered = similarity_scores[pred_idxs_class].detach(
+            ).clone()
 
             # remove gts of wrong classes
             # shape: gt_boxes class x pred boxes class
@@ -86,38 +83,45 @@ class GreedyMatcher(Matcher):
 
                 if preds_available:
                     # find best match -> convert to python scalar
-                    best_match_idx = torch.argmax(similarity_filtered[gt_idx]).item()
+                    if not reversed_score:
+                        best_match_idx = torch.argmax(
+                            similarity_filtered[gt_idx]).item()
+                    else:
+                        best_match_idx = torch.argmin(
+                            similarity_filtered[gt_idx]).item()
 
                     similarity_score = similarity_filtered[gt_idx][
-                        best_match_idx
-                    ].item()
+                        best_match_idx].item()
 
                 if preds_available and best_match_idx in non_matched_pred_idxs:
                     # this pred was not matched before -> match
                     non_matched_pred_idxs.remove(best_match_idx)
-                    # set score for this pred to a minimum for all following gts to prevent argmax from choosing it again
-                    # score > 0 so -1 should be fine
-                    similarity_filtered[:, best_match_idx] = -1
+                    # set score for this pred to a minimum (or maximum if reversed) for all following gts to prevent argmax / argmin from choosing it again
+                    if not reversed_score:
+                        similarity_filtered[:, best_match_idx] = float('-inf')
+                    else:
+                        similarity_filtered[:, best_match_idx] = float('inf')
 
                     # build the match
                     match = {
-                        "pred_box": pred_boxes_filtered[best_match_idx],
-                        "gt_box": gt_boxes_filtered[gt_idx],
-                        "label": c,
-                        "pred_score": pred_scores_filtered[best_match_idx].item(),
-                        "similarity_score": similarity_score,
-                        "data_id": data_id,
+                        'pred_box': pred_boxes_filtered[best_match_idx],
+                        'gt_box': gt_boxes_filtered[gt_idx],
+                        'label': c,
+                        'pred_score':
+                        pred_scores_filtered[best_match_idx].item(),
+                        'similarity_score': similarity_score,
+                        'data_id': data_id,
                     }
                     result[c].append(match)
                 else:
                     # no pred box was available e.g. all taken already or no preds -> unmatched gt
                     match = {
-                        "pred_box": None,
-                        "gt_box": gt_boxes_filtered[gt_idx],
-                        "label": c,
-                        "pred_score": float("-inf"),
-                        "similarity_score": float("-inf"),
-                        "data_id": data_id,
+                        'pred_box': None,
+                        'gt_box': gt_boxes_filtered[gt_idx],
+                        'label': c,
+                        'pred_score': float('-inf'),
+                        'similarity_score': float('-inf'),
+                        'data_id': data_id,
                     }
                     result[c].append(match)
 
@@ -127,12 +131,12 @@ class GreedyMatcher(Matcher):
                 for pred_idx in non_matched_pred_idxs:
                     # unmatched box, create empty match
                     match = {
-                        "pred_box": pred_boxes_filtered[pred_idx],
-                        "gt_box": None,
-                        "label": c,
-                        "pred_score": pred_scores_filtered[pred_idx].item(),
-                        "similarity_score": float("-inf"),
-                        "data_id": data_id,
+                        'pred_box': pred_boxes_filtered[pred_idx],
+                        'gt_box': None,
+                        'label': c,
+                        'pred_score': pred_scores_filtered[pred_idx].item(),
+                        'similarity_score': float('-inf'),
+                        'data_id': data_id,
                     }
                     result[c].append(match)
 
