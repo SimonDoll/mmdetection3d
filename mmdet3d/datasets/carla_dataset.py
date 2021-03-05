@@ -12,12 +12,10 @@ from ..core import show_result
 from ..core.bbox import Box3DMode, LiDARInstance3DBoxes
 from .custom_3d import Custom3DDataset
 
-from mmdet3d.core.evaluation.evaluation_3d.metrics import average_precision
 from mmdet3d.core.evaluation.evaluation_3d.matchers import GreedyMatcher
-from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import CenterDistance2d
-from mmdet3d.core.evaluation.evaluation_3d.metrics import AveragePrecision
-from mmdet3d.core.evaluation.evaluation_3d.metrics import MeanAveragePrecision
-from mmdet3d.core.evaluation.evaluation_3d.metrics import MetricPipeline
+from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import CenterDistance2d, Iou
+from mmdet3d.core.evaluation.evaluation_3d.metrics import AveragePrecision, MeanAveragePrecision, Recall, Precision, MetricPipeline
+
 from mmdet3d.core.evaluation.evaluation_3d.metrics.numeric_metric_result import NumericMetricResult
 
 
@@ -91,18 +89,21 @@ class CarlaDataset(Custom3DDataset):
         # we use class ids for matching, cat2id can be used to assign a category name later on
         self.matcher = GreedyMatcher(self.cat2id.values())
         # similarity_meassure = Iou()
-        self.similarity_meassure = CenterDistance2d()
+        self.similarity_meassure = Iou()
         # if centerpoint dist reverse matching order (lower is better)
-        self.similarity_reversed_score = True
+        self.similarity_reversed_score = False
 
+        similarity_threshold = 0.5
         # metrics
         avg_precision_metric = AveragePrecision(
-            similarity_threshold=0.3, reversed_score=self.similarity_reversed_score)
+            similarity_threshold=similarity_threshold, reversed_score=self.similarity_reversed_score)
         mean_avg_precision_metric = MeanAveragePrecision(
-            [0.5, 1, 2, 4], reversed_score=self.similarity_reversed_score)
+            [0.3, 0.5, 0.7, 0.9], reversed_score=self.similarity_reversed_score)
+        precision_metric = Precision(similarity_threshold)
+        recall_metric = Recall(similarity_threshold)
 
         self.metric_pipeline = MetricPipeline(
-            [avg_precision_metric, mean_avg_precision_metric])
+            [avg_precision_metric, mean_avg_precision_metric, recall_metric, precision_metric])
 
     def get_cat_ids(self, idx):
         """Get category distribution of single scene.
@@ -270,16 +271,7 @@ class CarlaDataset(Custom3DDataset):
         )
         return anns_results
 
-    def evaluate(
-        self,
-        results,
-        metric="bbox",
-        logger=None,
-        jsonfile_prefix=None,
-        result_names=["pts_bbox"],
-        show=False,
-        out_dir=None,
-    ):
+    def eval_preprocess(self, results, annotated_only=False):
         # the results are in the order of the data_infos, but do not contain annos as the eval hook
         # for the carla datasets no "fixed test set exists".
         # Therefore the boxes are available (different to nuscenes etc)
@@ -291,7 +283,10 @@ class CarlaDataset(Custom3DDataset):
 
         matching_results = {c: [] for c in self.cat2id.values()}
 
+        annotation_count = 0
+        frames_count = 0
         for i, res in enumerate(results):
+
             pred_boxes = res['pts_bbox']['boxes_3d']
             pred_scores = res['pts_bbox']['scores_3d']
             pred_labels = res['pts_bbox']['labels_3d']
@@ -301,6 +296,12 @@ class CarlaDataset(Custom3DDataset):
 
             # gt labels are a numpy array -> bring to torch
             gt_labels = torch.from_numpy(gt_labels)
+
+            if annotated_only and len(gt_labels) == 0:
+                # no annotations for this frame -> skip
+                continue
+            frames_count += 1
+            annotation_count += len(gt_labels)
 
             # TODO load input data aswell
             # calculate the similarity for the boxes
@@ -323,17 +324,44 @@ class CarlaDataset(Custom3DDataset):
             for c in single_matching_result.keys():
                 matching_results[c].extend(single_matching_result[c])
 
+        return matching_results, frames_count, annotation_count
+
+    def evaluate(
+        self,
+        results,
+        metric="bbox",
+        logger=None,
+        jsonfile_prefix=None,
+        result_names=["pts_bbox"],
+        show=False,
+        out_dir=None,
+    ):
+        matching_results_all, frames_count_all, annotation_count_all = self.eval_preprocess(
+            results, annotated_only=False)
+        matching_results_annotated_only, frames_count_annotated_only, annotation_count_annotated_only = self.eval_preprocess(
+            results, annotated_only=True)
+
         # evaluate metrics on the results
-        metric_results = self.metric_pipeline.evaluate(
-            matching_results, data=None)
+        metric_results_all = self.metric_pipeline.evaluate(
+            matching_results_all, data=None)
 
-        results_numeric = {}
+        metric_results_annoated_only = self.metric_pipeline.evaluate(
+            matching_results_annotated_only, data=None)
+
+        print("Results on all {} frames, annotations: {} ".format(
+            frames_count_all, annotation_count_all))
+        self.metric_pipeline.print_results(metric_results_all)
+        print("Results only the annotated frames {}, annotations: {} ".format(
+            frames_count_annotated_only, annotation_count_annotated_only))
+        self.metric_pipeline.print_results(metric_results_annoated_only)
+
+        results_numeric_all = {}
         # for now only collect single numeric  results
-        for metric_name, metric_return in metric_results.items():
+        for metric_name, metric_return in metric_results_all.items():
             if isinstance(metric_return, NumericMetricResult):
-                results_numeric[metric_name] = float(metric_return())
+                results_numeric_all[metric_name] = float(metric_return())
 
-        return results_numeric
+        return results_numeric_all
 
     def show(self, results, out_dir):
         raise NotImplementedError
