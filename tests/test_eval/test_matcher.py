@@ -131,3 +131,54 @@ class TestMatchers:
 
         # in the empty case a dict of classes -> empty list should be returned
         assert matching_results == {self.CLASSES[0]: [], self.CLASSES[1]: []}
+
+    def test_greedy_matcher_with_pred_boxes_only(self):
+        similarity_measure = Iou()
+        matcher = GreedyMatcher(self.CLASSES)
+
+        gt_boxes = torch.tensor([], dtype=torch.float)
+        gt_boxes = LiDARInstance3DBoxes(gt_boxes)
+        gt_labels = torch.tensor([], dtype=torch.float)
+
+        pred_boxes, pred_labels, pred_scores = self.create_pred_boxes()
+
+        similarity_scores = similarity_measure.calc_scores(
+            gt_boxes, pred_boxes, gt_labels, pred_labels)
+
+        data_id = 0
+        matching_results = matcher.match(
+            similarity_scores,
+            gt_boxes,
+            pred_boxes,
+            gt_labels,
+            pred_labels,
+            pred_scores,
+            data_id=data_id,
+        )
+
+        expected_results = {}
+        for i in range(len(pred_boxes)):
+            pred_box = pred_boxes[i]
+            label = pred_labels[i].item()
+            res = {'pred_box': pred_box,
+                   'gt_box': None,
+                   'label': label,
+                   'pred_score': pred_scores[i].item(),
+                   'similarity_score': float("-inf"),
+                   'data_id': data_id
+                   }
+            if not label in expected_results:
+                expected_results[label] = []
+            expected_results[label].append(res)
+        assert expected_results.keys() == matching_results.keys()
+
+        for k in expected_results.keys():
+            expected = expected_results[k]
+            matching_res = matching_results[k]
+
+            for exp, m in zip(expected,  matching_res):
+                e_box = exp.pop('pred_box')
+                m_box = m.pop('pred_box')
+                assert(torch.allclose(e_box.tensor, m_box.tensor))
+
+                assert(exp == m)
