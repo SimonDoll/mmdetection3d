@@ -54,37 +54,40 @@ class MetricPipeline:
                 warnings.warn(
                     'The following metrics result is of an unprintable type and therefore ignored: {}'
                     .format(metric_name))
-        # print the numeric results first
-        numeric_table = BeautifulTable()
-        numeric_table.header = ['Metric', 'Value']
-        for metric_name, numeric_result in results_numeric.items():
-            numeric_table.rows.append([metric_name, numeric_result])
 
-        print('=' * 40)
-        print('Evaluation results')
-        print('=' * 40)
-        print(numeric_table)
+        if results_numeric:
+            # print the numeric results first
+            numeric_table = BeautifulTable()
+            numeric_table.header = ['Metric', 'Value']
+            for metric_name, numeric_result in results_numeric.items():
+                numeric_table.rows.append([metric_name, numeric_result])
 
-        numeric_per_class_table = BeautifulTable()
-        header = None
-        for metric_name in class_results_numeric:
-            # sort the classes to get the same order for all rows
-            classes = sorted(class_results_numeric[metric_name])
-            if not header:
-                # add the class names to header
-                header = classes
+            # print('=' * 40)
+            # print('Evaluation results')
+            # print('=' * 40)
+            print(numeric_table)
 
-            # assert that the same classes are used for all metrics
-            assert header == classes
+        if class_results_numeric:
+            numeric_per_class_table = BeautifulTable()
+            header = None
+            for metric_name in class_results_numeric:
+                # sort the classes to get the same order for all rows
+                classes = sorted(class_results_numeric[metric_name])
+                if not header:
+                    # add the class names to header
+                    header = classes
 
-            row = [metric_name]
-            for class_id in class_results_numeric[metric_name]:
-                value = class_results_numeric[metric_name][class_id]()
-                row.append(value)
+                # assert that the same classes are used for all metrics
+                assert header == classes
 
-            numeric_per_class_table.rows.append(row)
+                row = [metric_name]
+                for class_id in class_results_numeric[metric_name]:
+                    value = class_results_numeric[metric_name][class_id]()
+                    row.append(value)
 
-        header = list(map(str, header))
-        numeric_per_class_table.header = ['Metric'] + header
+                numeric_per_class_table.rows.append(row)
 
-        print(numeric_per_class_table)
+            header = list(map(str, header))
+            numeric_per_class_table.header = ['Metric'] + header
+
+            print(numeric_per_class_table)

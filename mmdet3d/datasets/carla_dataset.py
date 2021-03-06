@@ -14,7 +14,7 @@ from .custom_3d import Custom3DDataset
 
 from mmdet3d.core.evaluation.evaluation_3d.matchers import GreedyMatcher
 from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import CenterDistance2d, Iou
-from mmdet3d.core.evaluation.evaluation_3d.metrics import AveragePrecision, MeanAveragePrecision, Recall, Precision, MetricPipeline
+from mmdet3d.core.evaluation.evaluation_3d.metrics import AveragePrecision, MeanAveragePrecision, Recall, Precision, MetricPipeline, FalsePositivesPerFrame
 
 from mmdet3d.core.evaluation.evaluation_3d.metrics.numeric_metric_result import NumericMetricResult
 
@@ -102,8 +102,12 @@ class CarlaDataset(Custom3DDataset):
         precision_metric = Precision(similarity_threshold)
         recall_metric = Recall(similarity_threshold)
 
-        self.metric_pipeline = MetricPipeline(
+        self.metric_pipeline_annotated = MetricPipeline(
             [avg_precision_metric, mean_avg_precision_metric, recall_metric, precision_metric])
+
+        fppf_metric = FalsePositivesPerFrame(
+            similarity_threshold, reversed_score=self.similarity_reversed_score)
+        self.metric_pipeline_non_annoated = MetricPipeline([fppf_metric])
 
     def get_cat_ids(self, idx):
         """Get category distribution of single scene.
@@ -271,20 +275,22 @@ class CarlaDataset(Custom3DDataset):
         )
         return anns_results
 
-    def eval_preprocess(self, results, annotated_only=False):
+    def eval_preprocess(self, results):
         # the results are in the order of the data_infos, but do not contain annos as the eval hook
         # for the carla datasets no "fixed test set exists".
         # Therefore the boxes are available (different to nuscenes etc)
         # ->  we load the annos from file (in the order of the predictions)
 
-        # print("data infos =", self.data_infos[0])
         # collect the gt data
         gt_annos = [self.get_ann_info(i) for i in range(len(results))]
 
-        matching_results = {c: [] for c in self.cat2id.values()}
+        matching_results_with_annotations = {
+            c: [] for c in self.cat2id.values()}
+        matching_results_no_annotations = {c: [] for c in self.cat2id.values()}
 
         annotation_count = 0
-        frames_count = 0
+        annotated_frames_count = 0
+        non_annotated_frames_count = 0
         for i, res in enumerate(results):
 
             pred_boxes = res['pts_bbox']['boxes_3d']
@@ -297,10 +303,10 @@ class CarlaDataset(Custom3DDataset):
             # gt labels are a numpy array -> bring to torch
             gt_labels = torch.from_numpy(gt_labels)
 
-            if annotated_only and len(gt_labels) == 0:
-                # no annotations for this frame -> skip
-                continue
-            frames_count += 1
+            if len(gt_labels) == 0:
+                non_annotated_frames_count += 1
+            else:
+                annotated_frames_count += 1
             annotation_count += len(gt_labels)
 
             # TODO load input data aswell
@@ -320,11 +326,17 @@ class CarlaDataset(Custom3DDataset):
                 i,
                 reversed_score=self.similarity_reversed_score,
             )
-            # accumulate matching results of multiple frames/instances
-            for c in single_matching_result.keys():
-                matching_results[c].extend(single_matching_result[c])
 
-        return matching_results, frames_count, annotation_count
+            for c in single_matching_result.keys():
+                if len(gt_labels) == 0:
+                    # no annotations for this frame
+                    matching_results_no_annotations[c].extend(
+                        single_matching_result[c])
+                else:
+                    matching_results_with_annotations[c].extend(
+                        single_matching_result[c])
+
+        return matching_results_with_annotations, annotated_frames_count, annotation_count, matching_results_no_annotations, non_annotated_frames_count
 
     def evaluate(
         self,
@@ -336,28 +348,29 @@ class CarlaDataset(Custom3DDataset):
         show=False,
         out_dir=None,
     ):
-        matching_results_all, frames_count_all, annotation_count_all = self.eval_preprocess(
-            results, annotated_only=False)
-        matching_results_annotated_only, frames_count_annotated_only, annotation_count_annotated_only = self.eval_preprocess(
-            results, annotated_only=True)
+        matching_results_with_annotations, annotated_frames_count, annotation_count, matching_results_no_annotations, non_annotated_frames_count = self.eval_preprocess(
+            results)
 
-        # evaluate metrics on the results
-        metric_results_all = self.metric_pipeline.evaluate(
-            matching_results_all, data=None)
+        # evaluate metrics on the annotated frames
+        metric_results_annotated = self.metric_pipeline_annotated.evaluate(
+            matching_results_with_annotations, data=None)
 
-        metric_results_annoated_only = self.metric_pipeline.evaluate(
-            matching_results_annotated_only, data=None)
+        metric_results_non_annoated = self.metric_pipeline_non_annoated.evaluate(
+            matching_results_no_annotations, data=None)
 
-        print("Results on all {} frames, annotations: {} ".format(
-            frames_count_all, annotation_count_all))
-        self.metric_pipeline.print_results(metric_results_all)
-        print("Results only the annotated frames {}, annotations: {} ".format(
-            frames_count_annotated_only, annotation_count_annotated_only))
-        self.metric_pipeline.print_results(metric_results_annoated_only)
+        print("Results on all {} annotated frames, annotations: {} ".format(
+            annotated_frames_count, annotation_count))
+        self.metric_pipeline_annotated.print_results(metric_results_annotated)
+
+        # evaluate metrics on the non annotated frames
+        print("Results on non annotated frames {}".format(
+            non_annotated_frames_count))
+        self.metric_pipeline_non_annoated.print_results(
+            metric_results_non_annoated)
 
         results_numeric_all = {}
-        # for now only collect single numeric  results
-        for metric_name, metric_return in metric_results_all.items():
+        # for now only collect single numeric results of annotated frames
+        for metric_name, metric_return in metric_results_annotated.items():
             if isinstance(metric_return, NumericMetricResult):
                 results_numeric_all[metric_name] = float(metric_return())
 
