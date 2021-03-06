@@ -1,6 +1,6 @@
 import copy
-
-from mmdet3d.core.evaluation.evaluation_3d.metrics.false_positives_per_frame_class_metric import FalsePositivesPerFrameClassMetric
+import pytest
+from mmdet3d.core.evaluation.evaluation_3d.metrics import FalsePositivesPerFrameClassMetric, FalsePositivesPerFrame
 
 
 class TestMetricFalsePositivesPerFrame:
@@ -126,3 +126,32 @@ class TestMetricFalsePositivesPerFrame:
 
         # 3 frames, 2 fps
         assert fps_per_frame[class_id]() == 0.0
+
+    def test_fps_per_frame(self):
+        class_id = '0'
+        matching_results = {
+            class_id: [
+                {
+                    'similarity_score': 0.9,
+                    'gt_box': True,
+                    'pred_score': 0.5
+                },
+                {
+                    'similarity_score': 1,
+                    'gt_box': None,
+                    'pred_score': 0.7
+                },
+                {
+                    'similarity_score': 0.7,
+                    'gt_box': None,
+                    'pred_score': 0.1
+                },
+            ]
+        }
+        metric_per_class = FalsePositivesPerFrameClassMetric()
+        fps_per_frame_per_class = metric_per_class.evaluate(matching_results)()
+
+        metric_mean_classes = FalsePositivesPerFrame()
+        fps_per_frame = metric_mean_classes.evaluate(matching_results)()
+
+        assert pytest.approx(fps_per_frame, fps_per_frame_per_class)

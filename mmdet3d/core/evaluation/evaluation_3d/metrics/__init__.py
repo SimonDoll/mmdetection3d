@@ -12,6 +12,7 @@ from .precision_per_class import PrecisionPerClass
 from .recall import Recall
 from .recall_per_class import RecallPerClass
 from .false_positives_per_frame_class_metric import FalsePositivesPerFrameClassMetric
+from .false_positives_per_frame_metric import FalsePositivesPerFrame
 __all__ = [
     'Basemetric',
     'PrecisionAtRecall',
@@ -24,4 +25,5 @@ __all__ = [
     'MetricPipeline',
     'MultiDistanceMetric',
     'FalsePositivesPerFrameClassMetric',
+    'FalsePositivesPerFrame'
 ]

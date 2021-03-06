@@ -16,7 +16,7 @@ class FalsePositivesPerFrameClassMetric(NumericClassMetric):
             reversed_score=reversed_score)
 
     def __str__(self):
-        return 'RecallPerClass'
+        return 'FalsePositivesPerFramePerClass'
 
     def compute(self, matching_results, data=None):
         decisions_per_class = self.compute_decisions(
