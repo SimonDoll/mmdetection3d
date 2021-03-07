@@ -153,13 +153,17 @@ class EvalPipeline:
                 pred_labels = result[0]['pts_bbox']['labels_3d']
                 pred_scores = result[0]['pts_bbox']['scores_3d']
 
+                # TODO add images if present
+                data = {}
+                data['points'] = points
+
                 result_with_gt_and_data = {
                     'gt_boxes': gt_boxes,
                     'gt_labels': gt_labels,
                     'pred_boxes': pred_boxes,
                     'pred_scores': pred_scores,
                     'pred_labels': pred_labels,
-                    'points': points
+                    'data': data
                 }
 
                 result_path = pathlib.Path(
@@ -179,11 +183,10 @@ class EvalPipeline:
         annotation_count = 0
         annotated_frames_count = 0
         non_annotated_frames_count = 0
-        matching_results_with_annoations = {c: []
-                                            for c in self.cat2id.values()}
-        matching_results_non_annoated = {c: [] for c in self.cat2id.values()}
 
-        for data_id, result_path in enumerate(tqdm.tqdm(result_paths)):
+        matching_results = {c: [] for c in self.cat2id.values()}
+
+        for data_id, result_path in tqdm.tqdm(result_paths.items()):
 
             # TODO check if this result format holds for all models
             result = None
@@ -214,25 +217,27 @@ class EvalPipeline:
                 pred_scores,
                 data_id,
                 reversed_score=self._reversed_score,
+
             )
 
+            for c in single_matching_result.keys():
+                matching_results[c].extend(
+                    single_matching_result[c])
             if len(gt_labels) == 0:
-                non_annotated_frames_count += 1
                 # no annotations for this frame
-                for c in single_matching_result.keys():
-                    matching_results_non_annoated[c].extend(
-                        single_matching_result[c])
+                non_annotated_frames_count += 1
+
             else:
                 annotated_frames_count += 1
                 annotation_count += len(gt_labels)
-                for c in single_matching_result.keys():
-                    matching_results_with_annoations[c].extend(
-                        single_matching_result[c])
 
-        return matching_results_with_annoations, matching_results_non_annoated, annotated_frames_count, non_annotated_frames_count, annotation_count
+        return matching_results, annotated_frames_count, non_annotated_frames_count, annotation_count
 
-    def _eval_full_range(self, matchings_annotated, matchings_non_annotated, annotated_frames_count, non_annotated_frames_count, annotation_count):
+    def _eval_full_range(self, annotated_paths, non_annoated_paths):
         # annoated frames
+        matchings_annotated, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
+            annotated_paths)
+
         print("=" * 40)
         print("Eval on annotated frames ({}) with {} annotations".format(
             annotated_frames_count, annotation_count))
@@ -240,6 +245,9 @@ class EvalPipeline:
             matchings_annotated)
         self._metric_pipeline_annotated.print_results(result_annotated)
 
+        # non annotated frames
+        matchings_non_annotated, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
+            non_annoated_paths)
         print("=" * 40)
         print("Eval on non annotated frames ({})".format(
             non_annotated_frames_count))
@@ -247,18 +255,51 @@ class EvalPipeline:
             matchings_non_annotated)
         self._metric_pipeline_non_annoated.print_results(result_non_annotated)
 
-    def _eval_distance_intervalls(self):
-        pass
+    def _eval_distance_intervals(self, annotated_paths, non_annoated_paths):
+        multi_distance_metric_annoated = MultiDistanceMetric(
+            self.cat2id.values(),
+            self._metric_pipeline_annotated,
+            distance_intervals=[0, 10, 20, 30],
+            similarity_measure=self._similarity_measure,
+            reversed_score=self._reversed_score,
+            matcher=self._matcher,
+            additional_filter_pipeline=None,
+        )
+        # TODO critical clean up and eval non annotated as well
+        interval_results_annotated = multi_distance_metric_annoated.evaluate(
+            annotated_paths)
+
+        MultiDistanceMetric.print_results(
+            interval_results_annotated, '/workspace/work_dirs/plots')
+
+    def _split_non_annoatated(self, result_paths):
+        annotated = {}
+        non_annoated = {}
+        for data_id, result_path in enumerate(tqdm.tqdm(result_paths)):
+
+            # TODO check if this result format holds for all models
+            result = None
+            with open(result_path, "rb") as fp:
+                result = pickle.load(fp)
+
+            assert result is not None, "pickeled result not found {}".format(
+                result_path)
+
+            gt_labels = result['gt_labels']
+            if len(gt_labels) == 0:
+                non_annoated[data_id] = result_path
+            else:
+                annotated[data_id] = result_path
+        return annotated, non_annoated
 
     def compute_metrics(self, result_paths):
         start = datetime.datetime.now()
 
-        matching_results_with_annoations, matching_results_non_annoated, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
+        annotated_paths, non_annoated_paths = self._split_non_annoatated(
             result_paths)
 
-        self._eval_full_range(matching_results_with_annoations,
-                              matching_results_non_annoated, annotated_frames_count, non_annotated_frames_count, annotation_count)
-
+        self._eval_full_range(annotated_paths, non_annoated_paths)
+        self._eval_distance_intervals(annotated_paths, non_annoated_paths)
         # # no evaluate on distance intervals
         # multi_distance_metric = MultiDistanceMetric(
         #     self.cat2id.values(),

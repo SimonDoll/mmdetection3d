@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import warnings
 from pathlib import Path
+import pickle
 
 from tqdm import tqdm
 from matplotlib import pyplot as plt
@@ -69,7 +70,169 @@ class MultiDistanceMetric:
 
         self._reversed_scores = reversed_score
 
-    def evaluate(self, inference_results):
+    def _preprocess_single(self, result_path, data_id):
+
+        # TODO check if this result format holds for all models
+        result = None
+        with open(result_path, "rb") as fp:
+            result = pickle.load(fp)
+
+        assert result is not None, "pickeled result not found {}".format(
+            result_path)
+
+        pred_boxes = result['pred_boxes']
+        pred_labels = result['pred_labels']
+        pred_scores = result['pred_scores']
+        gt_boxes = result['gt_boxes']
+        gt_labels = result['gt_labels']
+        input_data = result['data']
+
+        # only consider boxes in the current distance interval
+        (
+            gt_boxes,
+            pred_boxes,
+            gt_labels,
+            pred_labels,
+            pred_scores,
+            input_data,
+        ) = self._distance_filter.apply(
+            gt_boxes,
+            pred_boxes,
+            gt_labels,
+            pred_labels,
+            pred_scores,
+            input_data,
+        )
+
+        # apply additional filters if any
+        if self._additional_filter_pipeline:
+            (
+                gt_boxes,
+                pred_boxes,
+                gt_labels,
+                pred_labels,
+                pred_scores,
+                input_data,
+            ) = self._additional_filter_pipeline.apply(
+                gt_boxes,
+                pred_boxes,
+                gt_labels,
+                pred_labels,
+                pred_scores,
+                input_data,
+            )
+
+        # perform matching
+        # calculate the similarity for the boxes
+        similarity_scores = self._similarity_measure.calc_scores(
+            gt_boxes, pred_boxes, gt_labels, pred_labels)
+
+        # match gt and predictions
+        single_matching_result = self._matcher.match(
+            similarity_scores,
+            gt_boxes,
+            pred_boxes,
+            gt_labels,
+            pred_labels,
+            pred_scores,
+            data_id,
+            reversed_score=self._reversed_scores,
+        )
+
+        pred_count = len(pred_boxes)
+        pred_count_per_class = {}
+        gt_count = len(gt_boxes)
+        gt_count_per_class = {}
+
+        for class_id in self._classes:
+            if not class_id in gt_count_per_class:
+                # init all classes with empty gt counts
+                gt_count_per_class[class_id] = 0
+
+            if not class_id in pred_count_per_class:
+                # init all classes with empty pred counts
+                pred_count_per_class[class_id] = 0
+
+        # get the count for this interval
+        c = 0
+        for gt_box_label in gt_labels:
+            gt_count_per_class[gt_box_label.item()] += 1
+            c += 1
+        assert c == gt_count
+
+        # get the pred count for this interval
+        c = 0
+        for pred_box_label in pred_labels:
+            pred_count_per_class[pred_box_label.item()] += 1
+            c += 1
+        assert c == pred_count
+
+        return single_matching_result, pred_count_per_class, gt_count_per_class
+
+    def _evaluate_interval(self, result_paths, min_distance, max_distance):
+
+        # TODO critical change the filter to allow for 360° filtering currently front only
+        if not self._distance_filter:
+            self._distance_filter = BoxDistanceIntervalFilter(
+                min_radius=min_distance, max_radius=max_distance)
+        else:
+            self._distance_filter.max_radius = max_distance
+            self._distance_filter.min_radius = min_distance
+
+        pred_count = 0
+        gt_count = 0
+        gt_count_per_class = {}
+        pred_count_per_class = {}
+
+        matchings_for_interval = {c: [] for c in self._classes}
+        for class_id in self._classes:
+            gt_count_per_class[class_id] = 0
+            pred_count_per_class[class_id] = 0
+
+        for data_id, result_path in result_paths.items():
+            # perform matching
+            m_result, preds_per_class, gts_per_class = self._preprocess_single(
+                result_path, data_id)
+
+            # accumulate matchings for all frames
+            for c in m_result.keys():
+                matchings_for_interval[c].extend(m_result[c])
+
+            # count boxes
+            for c in self._classes:
+                gt_count_per_class[c] += gts_per_class[c]
+                gt_count += gts_per_class[c]
+                pred_count_per_class[c] += preds_per_class[c]
+                pred_count += preds_per_class[c]
+
+        # evaluate the metrics for this interval
+        metric_results = self._metric_pipeline.evaluate(matchings_for_interval)
+
+        interval_result = {
+            'min_dist': min_distance,
+            'max_dist': max_distance,
+            'pred_count': pred_count,
+            'pred_count_per_class': pred_count_per_class,
+            'results': metric_results,
+            'gt_count': gt_count,
+            'gt_count_per_class': gt_count_per_class
+        }
+        return interval_result
+
+    def evaluate(self, result_paths):
+        interval_results = []
+        # -1 because interval is defined from dist[i], dist[i+1]
+        for interval_idx in tqdm(range(len(self._distance_intervals) - 1)):
+            min_dist = self._distance_intervals[interval_idx]
+            max_dist = self._distance_intervals[interval_idx + 1]
+
+            interval_result = self._evaluate_interval(
+                result_paths, min_dist, max_dist)
+            interval_results.append(interval_result)
+
+        return interval_results
+
+    def evaluate_OLD(self, inference_results):
         """Runs the module. For each interval performs filtering, matching and
         then runs the eval pipeline.
 
