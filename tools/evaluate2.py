@@ -49,6 +49,8 @@ class EvalPipeline:
 
         self._temp_dir = tempfile.TemporaryDirectory()
 
+        self._init_metrics()
+
     def __del__(self):
         # clean up the temp directory
         self._temp_dir.cleanup()
@@ -97,9 +99,38 @@ class EvalPipeline:
         # if problems with backward compatibility (see test.py of mmdetection3d for a fix)
         self.model.CLASSES = checkpoint['meta']['CLASSES']
 
+    def _init_metrics(self, similarity_threshold=0.5):
+        self._similarity_measure = Iou()
+        # similarity_measure = CenterDistance2d()
+
+        # if centerpoint dist reverse matching order (lower is better)
+        self._reversed_score = False
+
+        # we use class ids for matching, cat2id can be used to assign a category name later on
+        self._matcher = GreedyMatcher(self.cat2id.values())
+
+        self._similarity_threshold = similarity_threshold
+
+        # metrics
+        avg_precision_metric = AveragePrecision(
+            similarity_threshold=self._similarity_threshold, reversed_score=self._reversed_score)
+        mean_avg_precision_metric = MeanAveragePrecision(
+            [0.2, 0.5, 0.8], reversed_score=self._reversed_score)
+
+        recall_metric = Recall(self._similarity_threshold)
+        precision_metric = Precision(self._similarity_threshold)
+
+        fp_per_frame_metric = FalsePositivesPerFrame(
+            self._similarity_threshold)
+
+        self._metric_pipeline_annotated = MetricPipeline(
+            [avg_precision_metric, mean_avg_precision_metric, precision_metric, recall_metric, fp_per_frame_metric])
+
+        self._metric_pipeline_non_annoated = MetricPipeline(
+            [fp_per_frame_metric])
+
     def _single_gpu_eval(self):
         self.model.eval()
-        results = []
         dataset = self.data_loader.dataset
         prog_bar = mmcv.ProgressBar(len(dataset))
 
@@ -144,37 +175,23 @@ class EvalPipeline:
                 prog_bar.update()
         return result_paths
 
-    def compute_metrics(self, result_paths):
-        start = datetime.datetime.now()
-
-        # similarity_meassure = Iou()
-        similarity_meassure = CenterDistance2d()
-
-        # if centerpoint dist reverse matching order (lower is better)
-        reversed_score = True
-
-        # we use class ids for matching, cat2id can be used to assign a category name later on
-        matcher = GreedyMatcher(self.cat2id.values())
-
-        # metrics
-        avg_precision_metric = AveragePrecision(
-            similarity_threshold=0.5, reversed_score=reversed_score)
-        mean_avg_precision_metric = MeanAveragePrecision(
-            [0.5, 1, 3], reversed_score=reversed_score)
-
-        metric_pipeline = MetricPipeline(
-            [avg_precision_metric, mean_avg_precision_metric])
-
-        matching_results = {c: [] for c in self.cat2id.values()}
+    def _eval_preprocess(self, result_paths):
+        annotation_count = 0
+        annotated_frames_count = 0
+        non_annotated_frames_count = 0
+        matching_results_with_annoations = {c: []
+                                            for c in self.cat2id.values()}
+        matching_results_non_annoated = {c: [] for c in self.cat2id.values()}
 
         for data_id, result_path in enumerate(tqdm.tqdm(result_paths)):
-            # TODO check if this result format holds for all models
 
+            # TODO check if this result format holds for all models
             result = None
             with open(result_path, "rb") as fp:
                 result = pickle.load(fp)
 
-            assert result is not None, "pickeled result not found"
+            assert result is not None, "pickeled result not found {}".format(
+                result_path)
 
             pred_boxes = result['pred_boxes']
             pred_labels = result['pred_labels']
@@ -183,21 +200,12 @@ class EvalPipeline:
             gt_boxes = result['gt_boxes']
             gt_labels = result['gt_labels']
 
-            if len(gt_labels) == 0:
-                continue
-
-            if len(pred_labels) == 0:
-                continue
-
-            # print("pred =", pred_boxes)
-            # print("gt =", gt_boxes)
-
             # calculate the similarity for the boxes
-            similarity_scores = similarity_meassure.calc_scores(
+            similarity_scores = self._similarity_measure.calc_scores(
                 gt_boxes, pred_boxes, gt_labels, pred_labels)
 
             # match gt and predictions
-            single_matching_result = matcher.match(
+            single_matching_result = self._matcher.match(
                 similarity_scores,
                 gt_boxes,
                 pred_boxes,
@@ -205,17 +213,68 @@ class EvalPipeline:
                 pred_labels,
                 pred_scores,
                 data_id,
-                reversed_score=reversed_score,
+                reversed_score=self._reversed_score,
             )
 
-            # accumulate matching results of multiple frames/instances
-            for c in single_matching_result.keys():
-                matching_results[c].extend(single_matching_result[c])
+            if len(gt_labels) == 0:
+                non_annotated_frames_count += 1
+                # no annotations for this frame
+                for c in single_matching_result.keys():
+                    matching_results_non_annoated[c].extend(
+                        single_matching_result[c])
+            else:
+                annotated_frames_count += 1
+                annotation_count += len(gt_labels)
+                for c in single_matching_result.keys():
+                    matching_results_with_annoations[c].extend(
+                        single_matching_result[c])
 
-        # evaluate metrics on the results
-        metric_results = metric_pipeline.evaluate(matching_results, data=None)
+        return matching_results_with_annoations, matching_results_non_annoated, annotated_frames_count, non_annotated_frames_count, annotation_count
 
-        metric_pipeline.print_results(metric_results)
+    def _eval_full_range(self, matchings_annotated, matchings_non_annotated, annotated_frames_count, non_annotated_frames_count, annotation_count):
+        # annoated frames
+        print("=" * 40)
+        print("Eval on annotated frames ({}) with {} annotations".format(
+            annotated_frames_count, annotation_count))
+        result_annotated = self._metric_pipeline_annotated.evaluate(
+            matchings_annotated)
+        self._metric_pipeline_annotated.print_results(result_annotated)
+
+        print("=" * 40)
+        print("Eval on non annotated frames ({})".format(
+            non_annotated_frames_count))
+        result_non_annotated = self._metric_pipeline_non_annoated.evaluate(
+            matchings_non_annotated)
+        self._metric_pipeline_non_annoated.print_results(result_non_annotated)
+
+    def _eval_distance_intervalls(self):
+        pass
+
+    def compute_metrics(self, result_paths):
+        start = datetime.datetime.now()
+
+        matching_results_with_annoations, matching_results_non_annoated, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
+            result_paths)
+
+        self._eval_full_range(matching_results_with_annoations,
+                              matching_results_non_annoated, annotated_frames_count, non_annotated_frames_count, annotation_count)
+
+        # # no evaluate on distance intervals
+        # multi_distance_metric = MultiDistanceMetric(
+        #     self.cat2id.values(),
+        #     self._metric_pipeline_annotated,
+        #     distance_intervals=[0, 10, 20, 30],
+        #     similarity_measure=self._similarity_measure,
+        #     reversed_score=self._reversed_score,
+        #     matcher=self._matcher,
+        #     additional_filter_pipeline=None,
+        # )
+
+        # distance_interval_results = multi_distance_metric.evaluate(
+        #     result_paths)
+
+        # MultiDistanceMetric.print_results(distance_interval_results,
+        #                                   '/workspace/work_dirs/plots')
 
         end = datetime.datetime.now()
         print('runtime eval millis =', (end - start).total_seconds() * 1000)
