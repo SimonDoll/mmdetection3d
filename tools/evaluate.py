@@ -6,12 +6,11 @@ import tempfile
 import time
 import os.path as osp
 import shutil
-
+import tempfile
 import datetime
+import pathlib
 
 import torch
-from torch import distributed as dist
-
 import pickle
 import tqdm
 
@@ -41,9 +40,20 @@ class EvalPipeline:
 
     def __init__(self, args):
         self._init_cfg(args.config_file)
-        self._init_processing(args)
+        # set random seeds
+        if args.seed is not None:
+            set_random_seed(args.seed, deterministic=args.deterministic)
+
         self._init_data()
         self._init_model(args.checkpoint_file)
+
+        self._temp_dir = tempfile.TemporaryDirectory()
+
+        self._init_metrics()
+
+    def __del__(self):
+        # clean up the temp directory
+        self._temp_dir.cleanup()
 
     def _init_cfg(self, config_file):
         self.cfg = Config.fromfile(config_file)
@@ -53,18 +63,18 @@ class EvalPipeline:
             torch.backends.cudnn.benchmark = True
 
         self.cfg.model.pretrained = None
-        self.cfg.data.custom_val.test_mode = False  # Assure to get ground truth
+        self.cfg.data.val.test_mode = False  # Assure to get ground truth
 
     def _init_data(self):
         # build the dataloader
         # TODO right config (train / val / test?)
-        samples_per_gpu = self.cfg.data.custom_val.pop('samples_per_gpu', 1)
-        dataset = build_dataset(self.cfg.data.custom_val)
+        samples_per_gpu = 1
+        dataset = build_dataset(self.cfg.data.val)
         self.data_loader = build_dataloader(
             dataset,
             samples_per_gpu=samples_per_gpu,
-            workers_per_gpu=self.cfg.data.workers_per_gpu,
-            dist=self.distributed,
+            workers_per_gpu=1,
+            dist=False,
             shuffle=False,
         )
 
@@ -77,7 +87,7 @@ class EvalPipeline:
         Args:
             checkpoint_file (str): Checkpoint file of trained model
         """
-        # TODO configs?
+        # TODO which configs?
         self.model = build_detector(
             self.cfg.model, None, test_cfg=self.cfg.test_cfg)
         fp16_cfg = self.cfg.get('fp16', None)
@@ -85,236 +95,120 @@ class EvalPipeline:
             wrap_fp16_model(self.model)
         checkpoint = load_checkpoint(
             self.model, checkpoint_file, map_location='cpu')
-        if args.fuse_conv_bn:
-            self.model = fuse_module(self.model)
 
         # if problems with backward compatibility (see test.py of mmdetection3d for a fix)
         self.model.CLASSES = checkpoint['meta']['CLASSES']
 
-    def _init_processing(self, args):
-        """Sets up distributed processing
-        Args:
-            args (Namespace): program options
-        """
-        # init distributed env first, since logger depends on the dist info.
-        if args.launcher == 'none':
-            self.distributed = False
-        else:
-            self.distributed = True
-            init_dist(args.launcher, **self.cfg.dist_params)
-
-        # set random seeds
-        if args.seed is not None:
-            set_random_seed(args.seed, deterministic=args.deterministic)
-
-    def _single_gpu_eval(self):
-        # TODO implement for non distributed models
-        raise NotImplementedError(
-            'Run distributed with single gpu as argument')
-
-    def _multi_gpu_eval(self, tmpdir=None):
-        """Test model with multiple gpus.
-
-        @see mmdet apis/test.py: multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False)
-        Saves the results on different gpus to 'tmpdir'
-        and collects them by the rank 0 worker.
-
-        Args:
-            tmpdir (str): Path of directory to save the temporary results from
-                different gpus.
-        Returns:
-            list: The prediction results.
-        """
-        self.model.eval()
-        results = []
-
-        dataset = self.data_loader.dataset
-        # check which process
-        rank, world_size = get_dist_info()
-        if rank == 0:
-            prog_bar = mmcv.ProgressBar(len(dataset))
-
-        # MMDET?
-        time.sleep(2)  # This line can prevent deadlock problem in some cases.
-
-        for i, data in enumerate(self.data_loader):
-
-            # TODO remove
-            # if i > 3:
-            #     break
-
-            with torch.no_grad():
-                # TODO use data to get points in boxes etc.
-                # remove gt to use the regular test mode
-                gt_bboxes_3d = data.pop('gt_bboxes_3d').data
-                gt_labels_3d = data.pop('gt_labels_3d').data
-
-                gt_result = {
-                    'gt_bboxes_3d': gt_bboxes_3d,
-                    'gt_labels_3d': gt_labels_3d
-                }
-
-                # test format needs an additional dimension
-                data['img_metas'] = [data['img_metas']]
-                data['points'] = [data['points']]
-
-                # predict
-                result = self.model(return_loss=False, rescale=True, **data)
-
-                # print("gt bboxes =", gt_bboxes_3d)
-                # print("gt labels =", gt_labels_3d)
-                # print("res =", result)
-
-                # TODO check if this interface is the same for other models / datasets
-                # add gt information (pred is [{'pts_bbox : pts infos}])
-                result[0]['pts_bbox'].update(gt_result)
-
-                # encode mask results
-                if isinstance(result[0], tuple):
-                    # TODO is this needed for our models?
-                    result = [(bbox_results, encode_mask_results(mask_results))
-                              for bbox_results, mask_results in result]
-
-            # clean the data a bit to make it easier to use in eval
-            # TODO check for different models
-            data['points'] = data['points'][0].data[0][0]
-
-            # store data and inference result
-            combined = {'data': data, 'result': result}
-            results.append(combined)
-
-            if rank == 0:
-                batch_size = len(result)
-                for _ in range(batch_size * world_size):
-                    prog_bar.update()
-
-        # collect results from all ranks
-        results = self.collect_results_cpu(results, len(dataset), tmpdir)
-        return results
-
-    @staticmethod
-    def collect_results_cpu(result_part, size, tmpdir=None):
-        """
-        @taken from mmdet/apis/test.py
-        copied because it is not in the official apis
-        """
-        rank, world_size = get_dist_info()
-        # create a tmp dir if it is not specified
-        if tmpdir is None:
-            MAX_LEN = 512
-            # 32 is whitespace
-            dir_tensor = torch.full((MAX_LEN, ),
-                                    32,
-                                    dtype=torch.uint8,
-                                    device='cuda')
-            if rank == 0:
-                mmcv.mkdir_or_exist('.dist_test')
-                tmpdir = tempfile.mkdtemp(dir='.dist_test')
-                tmpdir = torch.tensor(
-                    bytearray(tmpdir.encode()),
-                    dtype=torch.uint8,
-                    device='cuda')
-                dir_tensor[:len(tmpdir)] = tmpdir
-            dist.broadcast(dir_tensor, 0)
-            tmpdir = dir_tensor.cpu().numpy().tobytes().decode().rstrip()
-        else:
-            mmcv.mkdir_or_exist(tmpdir)
-        # dump the part result to the dir
-        mmcv.dump(result_part, osp.join(tmpdir, f'part_{rank}.pkl'))
-        dist.barrier()
-        # collect all parts
-        if rank != 0:
-            return None
-        else:
-            # load results of all parts from tmp dir
-            part_list = []
-            for i in range(world_size):
-                part_file = osp.join(tmpdir, f'part_{i}.pkl')
-                part_list.append(mmcv.load(part_file))
-            # sort the results
-            ordered_results = []
-            for res in zip(*part_list):
-                ordered_results.extend(list(res))
-            # the dataloader may pad some samples
-            ordered_results = ordered_results[:size]
-            # remove tmp dir
-            shutil.rmtree(tmpdir)
-            return ordered_results
-
-    def compute_metrics(self, inference_results):
-        start = datetime.datetime.now()
-
-        # similarity_meassure = Iou()
-        similarity_meassure = CenterDistance2d()
+    def _init_metrics(self, similarity_threshold=0.5):
+        self._similarity_measure = Iou()
+        # similarity_measure = CenterDistance2d()
 
         # if centerpoint dist reverse matching order (lower is better)
-        reversed_score = True
-
-        filter_range_interval = BoxDistanceIntervalFilter(
-            box_range=[0, 0, 30, 30])
-
-        filter_points_in_box = MinPointsInGtFilter()
-
-        filter_pipeline = FilterPipeline(
-            [filter_range_interval, filter_points_in_box])
+        self._reversed_score = False
 
         # we use class ids for matching, cat2id can be used to assign a category name later on
-        matcher = GreedyMatcher(self.cat2id.values())
+        self._matcher = GreedyMatcher(self.cat2id.values())
+
+        self._similarity_threshold = similarity_threshold
 
         # metrics
         avg_precision_metric = AveragePrecision(
-            similarity_threshold=4, reversed_score=reversed_score)
+            similarity_threshold=self._similarity_threshold, reversed_score=self._reversed_score)
         mean_avg_precision_metric = MeanAveragePrecision(
-            [0.5, 1, 2, 4], reversed_score=reversed_score)
+            [0.2, 0.5, 0.8], reversed_score=self._reversed_score)
 
-        metric_pipeline = MetricPipeline(
-            [avg_precision_metric, mean_avg_precision_metric])
+        recall_metric = Recall(self._similarity_threshold)
+        precision_metric = Precision(self._similarity_threshold)
+
+        fp_per_frame_metric = FalsePositivesPerFrame(
+            self._similarity_threshold)
+
+        self._metric_pipeline_annotated = MetricPipeline(
+            [avg_precision_metric, mean_avg_precision_metric, precision_metric, recall_metric, fp_per_frame_metric])
+
+        self._metric_pipeline_non_annoated = MetricPipeline(
+            [fp_per_frame_metric])
+
+    def _single_gpu_eval(self):
+        self.model.eval()
+        dataset = self.data_loader.dataset
+        prog_bar = mmcv.ProgressBar(len(dataset))
+
+        result_paths = []
+        for i, data in enumerate(self.data_loader):
+
+            with torch.no_grad():
+                annos = dataset.get_ann_info(i)
+
+                gt_boxes = annos['gt_bboxes_3d']
+                gt_labels = annos['gt_labels_3d']
+                # gt labels are a numpy array -> bring to torch
+                gt_labels = torch.from_numpy(gt_labels)
+
+                points = data['points'][0].data[0][0]
+
+                result = self.model(return_loss=False, rescale=True, **data)
+
+                pred_boxes = result[0]['pts_bbox']['boxes_3d']
+                pred_labels = result[0]['pts_bbox']['labels_3d']
+                pred_scores = result[0]['pts_bbox']['scores_3d']
+
+                # TODO add images if present
+                data = {}
+                data['points'] = points
+
+                result_with_gt_and_data = {
+                    'gt_boxes': gt_boxes,
+                    'gt_labels': gt_labels,
+                    'pred_boxes': pred_boxes,
+                    'pred_scores': pred_scores,
+                    'pred_labels': pred_labels,
+                    'data': data
+                }
+
+                result_path = pathlib.Path(
+                    str(self._temp_dir.name)).joinpath(str(i) + ".pkl")
+                # pickle the data to avoid shared memory overflow
+                with open(result_path, "wb") as fp:
+                    pickle.dump(result_with_gt_and_data, fp)
+
+                result_paths.append(result_path)
+
+            batch_size = len(result)
+            for _ in range(batch_size):
+                prog_bar.update()
+        return result_paths
+
+    def _eval_preprocess(self, result_paths):
+        annotation_count = 0
+        annotated_frames_count = 0
+        non_annotated_frames_count = 0
 
         matching_results = {c: [] for c in self.cat2id.values()}
 
-        for data_id, res in enumerate(tqdm.tqdm(inference_results)):
+        for data_id, result_path in tqdm.tqdm(result_paths.items()):
+
             # TODO check if this result format holds for all models
+            result = None
+            with open(result_path, "rb") as fp:
+                result = pickle.load(fp)
 
-            # get inference resutls and input data
-            input_data = res['data']
-            inference_result = res['result'][0]
+            assert result is not None, "pickeled result not found {}".format(
+                result_path)
 
-            inference_result = inference_result['pts_bbox']
+            pred_boxes = result['pred_boxes']
+            pred_labels = result['pred_labels']
+            pred_scores = result['pred_scores']
 
-            pred_boxes = inference_result['boxes_3d']
-
-            pred_labels = inference_result['labels_3d']
-            pred_scores = inference_result['scores_3d']
-            # gt are wrapped in additional lists
-            # TODO check reason
-            gt_boxes = inference_result['gt_bboxes_3d'][0][0]
-            gt_labels = inference_result['gt_labels_3d'][0][0]
-
-            # TODO remove critical debug only
-            # pred_boxes = gt_boxes
-            # pred_labels = gt_labels
-            # pred_scores = pred_scores[0 : len(pred_labels)]
-
-            # print("pred labels =", pred_labels)
-            # print("gt labels =", gt_labels)
-
-            # filter the boxes
-            (
-                gt_boxes,
-                pred_boxes,
-                gt_labels,
-                pred_labels,
-                pred_scores,
-                input_data,
-            ) = filter_pipeline.apply(gt_boxes, pred_boxes, gt_labels,
-                                      pred_labels, pred_scores, input_data)
+            gt_boxes = result['gt_boxes']
+            gt_labels = result['gt_labels']
 
             # calculate the similarity for the boxes
-            similarity_scores = similarity_meassure.calc_scores(
+            similarity_scores = self._similarity_measure.calc_scores(
                 gt_boxes, pred_boxes, gt_labels, pred_labels)
 
             # match gt and predictions
-            single_matching_result = matcher.match(
+            single_matching_result = self._matcher.match(
                 similarity_scores,
                 gt_boxes,
                 pred_boxes,
@@ -322,29 +216,119 @@ class EvalPipeline:
                 pred_labels,
                 pred_scores,
                 data_id,
-                reversed_score=reversed_score,
+                reversed_score=self._reversed_score,
+
             )
 
-            # accumulate matching results of multiple frames/instances
             for c in single_matching_result.keys():
-                matching_results[c].extend(single_matching_result[c])
+                matching_results[c].extend(
+                    single_matching_result[c])
+            if len(gt_labels) == 0:
+                # no annotations for this frame
+                non_annotated_frames_count += 1
 
-        # evaluate metrics on the results
-        metric_results = metric_pipeline.evaluate(matching_results, data=None)
+            else:
+                annotated_frames_count += 1
+                annotation_count += len(gt_labels)
 
-        metric_pipeline.print_results(metric_results)
+        return matching_results, annotated_frames_count, non_annotated_frames_count, annotation_count
+
+    def _eval_full_range(self, annotated_paths, non_annoated_paths):
+        # annoated frames
+        matchings_annotated, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
+            annotated_paths)
+
+        print("=" * 40)
+        print("Eval on annotated frames ({}) with {} annotations".format(
+            annotated_frames_count, annotation_count))
+        result_annotated = self._metric_pipeline_annotated.evaluate(
+            matchings_annotated)
+        self._metric_pipeline_annotated.print_results(result_annotated)
+
+        # non annotated frames
+        matchings_non_annotated, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
+            non_annoated_paths)
+        print("=" * 40)
+        print("Eval on non annotated frames ({})".format(
+            non_annotated_frames_count))
+        result_non_annotated = self._metric_pipeline_non_annoated.evaluate(
+            matchings_non_annotated)
+        self._metric_pipeline_non_annoated.print_results(result_non_annotated)
+
+    def _eval_distance_intervals(self, annotated_paths, non_annoated_paths):
+        multi_distance_metric_annoated = MultiDistanceMetric(
+            self.cat2id.values(),
+            self._metric_pipeline_annotated,
+            distance_intervals=[0, 20, 40, 70, 100],
+            similarity_measure=self._similarity_measure,
+            reversed_score=self._reversed_score,
+            matcher=self._matcher,
+            additional_filter_pipeline=None,
+        )
+        # TODO critical clean up and eval non annotated as well
+        interval_results_annotated = multi_distance_metric_annoated.evaluate(
+            annotated_paths)
+
+        MultiDistanceMetric.print_results(
+            interval_results_annotated, '/workspace/work_dirs/plots')
+
+    def _split_non_annoatated(self, result_paths):
+        annotated = {}
+        non_annoated = {}
+        for data_id, result_path in enumerate(tqdm.tqdm(result_paths)):
+
+            # TODO check if this result format holds for all models
+            result = None
+            with open(result_path, "rb") as fp:
+                result = pickle.load(fp)
+
+            assert result is not None, "pickeled result not found {}".format(
+                result_path)
+
+            gt_labels = result['gt_labels']
+            if len(gt_labels) == 0:
+                non_annoated[data_id] = result_path
+            else:
+                annotated[data_id] = result_path
+        return annotated, non_annoated
+
+    def compute_metrics(self, result_paths):
+        start = datetime.datetime.now()
+
+        annotated_paths, non_annoated_paths = self._split_non_annoatated(
+            result_paths)
+
+        self._eval_full_range(annotated_paths, non_annoated_paths)
+        self._eval_distance_intervals(annotated_paths, non_annoated_paths)
+        # # no evaluate on distance intervals
+        # multi_distance_metric = MultiDistanceMetric(
+        #     self.cat2id.values(),
+        #     self._metric_pipeline_annotated,
+        #     distance_intervals=[0, 10, 20, 30],
+        #     similarity_measure=self._similarity_measure,
+        #     reversed_score=self._reversed_score,
+        #     matcher=self._matcher,
+        #     additional_filter_pipeline=None,
+        # )
+
+        # distance_interval_results = multi_distance_metric.evaluate(
+        #     result_paths)
+
+        # MultiDistanceMetric.print_results(distance_interval_results,
+        #                                   '/workspace/work_dirs/plots')
 
         end = datetime.datetime.now()
         print('runtime eval millis =', (end - start).total_seconds() * 1000)
 
     def compute_metrics2(self, inference_results):
+        raise NotImplementedError()
         start = datetime.datetime.now()
 
-        # similarity_meassure = Iou()
-        similarity_measure = CenterDistance2d()
+        similarity_measure = Iou()
+        # similarity_measure = CenterDistance2d()
 
         # if centerpoint dist reverse matching order (lower is better)
-        reversed_score = True
+        reversed_score = False
 
         filter_points_in_box = MinPointsInGtFilter()
 
@@ -352,7 +336,7 @@ class EvalPipeline:
 
         matcher = GreedyMatcher(self.cat2id.values())
 
-        similarity_threshold = 4
+        similarity_threshold = 0.5
         # metrics
         avg_precision_metric = AveragePrecision(
             similarity_threshold=similarity_threshold,
@@ -366,8 +350,11 @@ class EvalPipeline:
             similarity_threshold=similarity_threshold,
             reversed_score=reversed_score)
 
+        # mean_avg_precision_metric = MeanAveragePrecision(
+        #     [0.5, 1, 2, 4], reversed_score=reversed_score)
+
         mean_avg_precision_metric = MeanAveragePrecision(
-            [0.5, 1, 2, 4], reversed_score=reversed_score)
+            [0.3, 0.5, 0.7], reversed_score=reversed_score)
 
         precision = Precision(similarity_threshold, reversed_score)
         recall = Recall(similarity_threshold, reversed_score)
@@ -407,6 +394,8 @@ class EvalPipeline:
             }
             inference_results_preprocessed.append(res_preprocessed)
 
+        print("frames =", len(inference_results_preprocessed))
+
         multi_distance_metric = MultiDistanceMetric(
             self.cat2id.values(),
             metric_pipeline,
@@ -439,20 +428,9 @@ class EvalPipeline:
         Args:
             tmpdir (str, optional): Folder to save intermediate results to (mainly for debugging). Defaults to None.
         """
-        if not self.distributed:
-            self.model = MMDataParallel(self.model, device_ids=[0])
-            results = self._single_gpu_eval(self.model, self.data_loader,
-                                            args.show, args.show_dir)
-        else:
-            print('distributed eval')
-            self.model = MMDistributedDataParallel(
-                self.model.cuda(),
-                device_ids=[torch.cuda.current_device()],
-                broadcast_buffers=False,
-            )
-            results = self._multi_gpu_eval(tmpdir)
-
-            self.compute_metrics2(results)
+        self.model = MMDataParallel(self.model, device_ids=[0])
+        result_paths = self._single_gpu_eval()
+        self.compute_metrics(result_paths)
 
 
 if __name__ == '__main__':
@@ -467,30 +445,6 @@ if __name__ == '__main__':
     # TODO output folder
     # parser.add_argument('--out', help='output result file in pickle format')
 
-    # --------------------------------
-    # MMDETECTION3D test arguments
-    # --------------------------------
-    parser.add_argument(
-        '--fuse-conv-bn',
-        action='store_true',
-        help='Whether to fuse conv and bn, this will slightly increase'
-        'the inference speed',
-    )
-
-    # TODO visualization
-    # parser.add_argument('--show', action='store_true', help='show results')
-    # parser.add_argument(
-    #     '--show-dir', help='directory where results will be saved')
-
-    # TODO gpu collect needed?
-    # parser.add_argument(
-    #     '--gpu-collect',
-    #     action='store_true',
-    #     help='whether to use gpu to collect results.')
-    # parser.add_argument(
-    #     '--tmpdir',
-    #     help='tmp directory used for collecting results from multiple '
-    #     'workers, available when gpu_collect is not specified')
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument(
         '--deterministic',

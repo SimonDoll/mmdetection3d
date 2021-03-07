@@ -205,8 +205,12 @@ class MultiDistanceMetric:
                 pred_count_per_class[c] += preds_per_class[c]
                 pred_count += preds_per_class[c]
 
+        print("=" * 40)
+        print("Evaluating interval [{},{}), frames: {}, gt annos: {}, preds:{}".format(
+            min_distance, max_distance, len(result_paths), gt_count, pred_count))
         # evaluate the metrics for this interval
         metric_results = self._metric_pipeline.evaluate(matchings_for_interval)
+        self._metric_pipeline.print_results(metric_results)
 
         interval_result = {
             'min_dist': min_distance,
