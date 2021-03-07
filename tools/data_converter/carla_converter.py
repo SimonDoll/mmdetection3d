@@ -54,7 +54,7 @@ def create_carla_infos(
     # val set
     val_set = root_path.joinpath(val_set_folder_name)
     val_infos, val_meta = _run_for_set(
-        train_set, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
+        val_set, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
     # test set
     test_set = root_path.joinpath(test_set_folder_name)
     test_infos, test_meta = _run_for_set(
