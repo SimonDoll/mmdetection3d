@@ -101,57 +101,65 @@ def _fill_scene_infos(loader, max_prev_samples=10, lidar_name="lidar_top", ego_p
 
     full_frame_infos = []
 
-    for sample_token in mmcv.track_iter_progress(loader.sample_tokens):
-        sample = loader.get_sample(sample_token)
+    for scene_token in mmcv.track_iter_progress(loader.scene_tokens):
+        scene = loader.get_scene(scene_token)
 
-        sample_infos = _collect_sample_data_infos(
-            sample, loader, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
+        current_sample_token = scene.first_sample_token
+        while current_sample_token is not None:
+            sample = loader.get_sample(current_sample_token)
 
-        current_frame_info = sample_infos[0]
-        prev_frames_infos = sample_infos[1:]
+            sample_infos = _collect_sample_data_infos(
+                sample, loader, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
 
-        # add annotations, (only needed for the current frame the previous ones are for data only)
-        current_frame_info = sample_infos[0]
-        # obtain annotations
-        annotations = [loader.get_annotation(
-            token) for token in sample.annotation_tokens]
+            current_frame_info = sample_infos[0]
+            prev_frames_infos = sample_infos[1:]
 
-        # extract the bounding boxes
-        # TODO what about pitch and roll?
-        # include check that those are 0.0
-        # boxes are xyz_wlh_yaw -> 7
-        gt_boxes = np.empty((len(annotations), 7))
-        gt_velocity = np.empty((len(annotations), 2))
-        names = []
-        for i, annotation in enumerate(annotations):
+            # add annotations, (only needed for the current frame the previous ones are for data only)
+            current_frame_info = sample_infos[0]
+            # obtain annotations
+            annotations = [loader.get_annotation(
+                token) for token in sample.annotation_tokens]
 
-            xyz_wlh_yaw = annotation_to_lidar(
-                annotation, current_frame_info['ego_t_lidar'], current_frame_info['ego_R_lidar'], current_frame_info['global_t_ego'], current_frame_info['global_R_ego'])
+            # extract the bounding boxes
+            # TODO what about pitch and roll?
+            # include check that those are 0.0
+            # boxes are xyz_wlh_yaw -> 7
+            gt_boxes = np.empty((len(annotations), 7))
+            gt_velocity = np.empty((len(annotations), 2))
+            names = []
+            for i, annotation in enumerate(annotations):
 
-            # only use velocity in the x-y plane
-            velocity = annotation.velocity[0:2]
-            gt_velocity[i] = velocity
-            # TODO double check with rotated boxes!!
-            # i think we dont need this anymore
-            # we need to convert rot to SECOND format.
-            # TODO source?
-            # xyz_wlh_yaw[6] = -xyz_wlh_yaw[6] - np.pi / 2
-            gt_boxes[i] = xyz_wlh_yaw
-            category_name = category_token_to_name[annotation.category_token]
-            names.append(category_name)
+                xyz_wlh_yaw = annotation_to_lidar(
+                    annotation, current_frame_info['ego_t_lidar'], current_frame_info['ego_R_lidar'], current_frame_info['global_t_ego'], current_frame_info['global_R_ego'])
 
-        names = np.array(names)
+                # only use velocity in the x-y plane
+                velocity = annotation.velocity[0:2]
+                gt_velocity[i] = velocity
+                # TODO double check with rotated boxes!!
+                # i think we dont need this anymore
+                # we need to convert rot to SECOND format.
+                # TODO source?
+                # xyz_wlh_yaw[6] = -xyz_wlh_yaw[6] - np.pi / 2
+                gt_boxes[i] = xyz_wlh_yaw
+                category_name = category_token_to_name[annotation.category_token]
+                names.append(category_name)
 
-        assert len(gt_boxes) == len(
-            annotations), f"{len(gt_boxes)}, {len(annotations)}"
-        current_frame_info["gt_boxes"] = gt_boxes
-        current_frame_info["gt_names"] = names
-        # for now we do not add obb dynamics
-        current_frame_info["gt_velocity"] = gt_velocity
+            names = np.array(names)
 
-        current_frame_info["prev"] = prev_frames_infos
+            assert len(gt_boxes) == len(
+                annotations), f"{len(gt_boxes)}, {len(annotations)}"
+            current_frame_info["gt_boxes"] = gt_boxes
+            current_frame_info["gt_names"] = names
+            # for now we do not add obb dynamics
+            current_frame_info["gt_velocity"] = gt_velocity
 
-        full_frame_infos.append(current_frame_info)
+            current_frame_info["prev"] = prev_frames_infos
+
+            full_frame_infos.append(current_frame_info)
+
+            # move to next frame  (will be None if scene ends)
+            current_sample_token = sample.next_token
+
     return full_frame_infos
 
 
