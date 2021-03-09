@@ -18,11 +18,18 @@ class FalsePositivesPerFrameClassMetric(NumericClassMetric):
     def __str__(self):
         return 'FalsePositivesPerFramePerClass'
 
+    def _extract_frame_count(self, matching_results_per_class):
+        unique_data_ids = set()
+        for m_res in matching_results_per_class:
+            unique_data_ids.add(m_res['data_id'])
+
+        return len(unique_data_ids)
+
     def compute(self, matching_results, data=None):
         decisions_per_class = self.compute_decisions(
             matching_results,
             self._similarity_threshold,
-            return_idxs=True,
+            return_idxs=False,
             reversed_score=self._reversed_score,
         )
 
@@ -30,13 +37,12 @@ class FalsePositivesPerFrameClassMetric(NumericClassMetric):
                                      for class_id in matching_results.keys()}
 
         for class_id in matching_results.keys():
-            frame_count = len(matching_results[class_id])
+            frame_count = self._extract_frame_count(matching_results[class_id])
             if frame_count == 0:
                 # no frames for this class -> continue
                 continue
 
-            fps = decisions_per_class[class_id]['fps'].sum().item()
-
+            fps = decisions_per_class[class_id]['fps']
             false_positives_per_class[class_id] = float(fps) / frame_count
 
         return false_positives_per_class
