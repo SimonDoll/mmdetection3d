@@ -66,6 +66,7 @@ class CarlaDataset(Custom3DDataset):
         box_type_3d="LiDAR",
         filter_empty_gt=False,
         test_mode=False,
+        with_velocity=True,
     ):
         self.load_interval = load_interval
         super().__init__(
@@ -84,6 +85,8 @@ class CarlaDataset(Custom3DDataset):
                 use_camera=False,
                 use_lidar=True,
             )
+
+        self._with_velocity = with_velocity
 
         # setup the metric pipeline for evaluation
         # we use class ids for matching, cat2id can be used to assign a category name later on
@@ -249,10 +252,9 @@ class CarlaDataset(Custom3DDataset):
         info = self.data_infos[index]
 
         gt_bboxes_3d = info["gt_boxes"]
-
-        # TODO for now we always add the velocity, maybe make switchable later
-        gt_velocity = info["gt_velocity"]
-        gt_bboxes_3d = np.concatenate([gt_bboxes_3d, gt_velocity], axis=-1)
+        if self._with_velocity:
+            gt_velocity = info["gt_velocity"]
+            gt_bboxes_3d = np.concatenate([gt_bboxes_3d, gt_velocity], axis=-1)
 
         gt_names_3d = info["gt_names"]
         gt_labels_3d = []
