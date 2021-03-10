@@ -353,3 +353,289 @@ def get_sensor_relative_to(ego_t_sensor_source, ego_R_sensor_source, ego_t_senso
 
     target_T_source = np.dot(np.linalg.inv(world_T_target), world_T_source)
     return _transform_to_translation_rotation(target_T_source)
+
+
+def export_2d_annotation(set_folder, info_path, ego_pose_sensor_name="imu_perfect", camera_names=["cam_front"]):
+
+    loader = DatasetLoader(set_folder)
+    loader.setup()
+
+    ego_pose_sensor, ego_pose_calib = loading_utils.load_sensor_with_calib(
+        loader, ego_pose_sensor_name)
+
+    camera_sensors, camera_calibs = loading_utils.load_sensors_with_calibs(
+        loader, camera_names)
+
+    carla_infos = mmcv.load(info_path)["infos"]
+    # info_2d_list = []
+    cat2Ids = [
+        dict(id=carla_categories.index(cat_name), name=cat_name)
+        for cat_name in carla_categories
+    ]
+    coco_ann_id = 0
+    coco_2d_dict = dict(annotations=[], images=[], categories=cat2Ids)
+    i = 0
+    for info in mmcv.track_iter_progress(carla_infos):
+        if len(info['gt_boxes']) == 0:
+            continue
+
+        i += 1
+
+        if i < 15:
+            continue
+
+        for cam in camera_names:
+            cam_info = info["cams"][cam]
+
+            img_path = cam_info["data_path"]
+
+            coco_infos = get_2d_boxes(
+                loader,
+                info["token"],
+                ego_pose_sensor,
+                ego_pose_calib,
+                camera_sensors[cam],
+                camera_calibs[cam],
+                img_path
+            )
+            print("img =", cam_info["data_path"])
+
+            exit(0)
+            (height, width, _) = mmcv.imread(cam_info["data_path"]).shape
+            coco_2d_dict["images"].append(
+                dict(
+                    file_name=cam_info["data_path"],
+                    id=info["token"],
+                    width=width,
+                    height=height,
+                )
+            )
+            for coco_info in coco_infos:
+                if coco_info is None:
+                    continue
+                # add an empty key for coco format
+                coco_info["segmentation"] = []
+                coco_info["id"] = coco_ann_id
+                coco_2d_dict["annotations"].append(coco_info)
+                coco_ann_id += 1
+    mmcv.dump(coco_2d_dict, f"{info_path[:-4]}.coco.json")
+
+
+def _get_obb_corners(obb_center, obb_rotation, obb_extent):
+
+    corners = {}
+
+    bottom_front_left_offset = np.dot(obb_rotation, np.asarray(
+        [-obb_extent[0], -obb_extent[1], -obb_extent[2]]))
+    corners['bottom_front_left'] = obb_center + bottom_front_left_offset
+
+    bottom_front_right_offset = np.dot(obb_rotation, np.asarray(
+        [-obb_extent[0], obb_extent[1], -obb_extent[2]]))
+    corners['bottom_front_right'] = obb_center + bottom_front_right_offset
+
+    top_front_left_offset = np.dot(obb_rotation, np.asarray(
+        [-obb_extent[0], -obb_extent[1], obb_extent[2]]))
+    corners['top_front_left'] = obb_center + top_front_left_offset
+
+    top_front_right_offset = np.dot(obb_rotation, np.asarray(
+        [-obb_extent[0], obb_extent[1], obb_extent[2]]))
+    corners['top_front_right'] = obb_center + top_front_right_offset
+
+    bottom_back_left_offset = np.dot(obb_rotation, np.asarray(
+        [obb_extent[0], -obb_extent[1], -obb_extent[2]]))
+    corners['bottom_back_left'] = obb_center + bottom_back_left_offset
+
+    bottom_back_right_offset = np.dot(obb_rotation, np.asarray(
+        [obb_extent[0], obb_extent[1], -obb_extent[2]]))
+    corners['bottom_back_right'] = obb_center + bottom_back_right_offset
+
+    top_back_left_offset = np.dot(obb_rotation, np.asarray(
+        [obb_extent[0], -obb_extent[1], obb_extent[2]]))
+    corners['top_back_left'] = obb_center + top_back_left_offset
+
+    top_back_right_offset = np.dot(obb_rotation, np.asarray(
+        [obb_extent[0], obb_extent[1], obb_extent[2]]))
+    corners['top_back_right'] = obb_center + top_back_right_offset
+
+    return corners
+
+
+def get_2d_boxes(
+        loader, sample_token: str, ego_pose_sensor, ego_pose_calib, camera_sensor, camera_calib, img_path) -> List[OrderedDict]:
+    """Get the 2D annotation records for a given `sample_token`.
+    """
+
+    # Get the sample data and the sample corresponding to that sample data.
+    sample = loader.get_sample(sample_token)
+
+    # get the sensor_data
+    ego_pose_sensor_data = loading_utils.load_sensor_data(
+        loader, sample, ego_pose_sensor)
+
+    camera_sensor_data = loading_utils.load_sensor_data(
+        loader, sample, camera_sensor)
+
+    # we need the transform from world -> camera coords
+    # get the ego pose
+    ego_T_ego_pose_sensor = ego_pose_calib.transform
+    global_T_ego_pose_sensor = _load_ego_pose(
+        loader, ego_pose_sensor_data.file)
+    global_T_ego = np.dot(global_T_ego_pose_sensor,
+                          np.linalg.inv(ego_T_ego_pose_sensor))
+
+    ego_T_global = np.linalg.inv(global_T_ego)
+
+    ego_T_cam = camera_calib.transform
+
+    cam_T_global = np.dot(np.linalg.inv(ego_T_cam), ego_T_global)
+
+    repro_recs = []
+
+    for anno_token in sample.annotation_tokens:
+
+        annotation = loader.get_annotation(anno_token)
+
+        anno_center, anno_rotation = _transform_to_translation_rotation(
+            annotation.transform)
+        box_corners_3d = _get_obb_corners(
+            anno_center, anno_rotation, annotation.size)
+
+        # TODO refactor performance (if necessary)
+        corners_2d = []
+        for c, cords_3d in box_corners_3d.items():
+            # world -> camera frame
+            cords_4d = np.ones((4,))
+            cords_4d[0:3] = cords_3d
+
+            cords_3d = np.dot(cam_T_global, cords_4d)
+            cords_3d = cords_3d[0:3]
+
+            # Project 3d box to 2d.
+            cords_2d = np.dot(camera_calib.camera_intrinsic, cords_3d)
+
+            # normalize by depth (add epsilon for numeric stability)
+            cords_2d[2] += np.finfo(float).eps
+            cords_2d /= cords_2d[2]
+            corners_2d.append(cords_2d)
+
+        # Keep only corners that fall within the image.
+        final_coords = post_process_coords(corners_2d)
+
+        # Skip if the convex hull of the re-projected corners
+        # does not intersect the image canvas.
+        if final_coords is None:
+            continue
+        else:
+            min_x, min_y, max_x, max_y = final_coords
+
+        # Generate dictionary record to be included in the .json file.
+        repro_rec = generate_record(min_x, min_y, max_x, max_y, sample_token, img_path
+                                    )
+        repro_recs.append(repro_rec)
+
+    return repro_recs
+
+
+def post_process_coords(
+    corner_coords: List, imsize: Tuple[int, int] = (1600, 900)
+) -> Union[Tuple[float, float, float, float], None]:
+    """Get the intersection of the convex hull of the reprojected bbox corners
+    and the image canvas, return None if no intersection.
+
+    Args:
+        corner_coords (list[int]): Corner coordinates of reprojected
+            bounding box.
+        imsize (tuple[int]): Size of the image canvas.
+
+    Return:
+        tuple [float]: Intersection of the convex hull of the 2D box
+            corners and the image canvas.
+    """
+    polygon_from_2d_box = MultiPoint(corner_coords).convex_hull
+    img_canvas = box(0, 0, imsize[0], imsize[1])
+
+    if polygon_from_2d_box.intersects(img_canvas):
+        img_intersection = polygon_from_2d_box.intersection(img_canvas)
+        intersection_coords = np.array(
+            [coord for coord in img_intersection.exterior.coords]
+        )
+
+        min_x = min(intersection_coords[:, 0])
+        min_y = min(intersection_coords[:, 1])
+        max_x = max(intersection_coords[:, 0])
+        max_y = max(intersection_coords[:, 1])
+
+        return min_x, min_y, max_x, max_y
+    else:
+        return None
+
+
+def generate_record(
+    ann_rec: dict,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    sample_data_token: str,
+    filename: str,
+) -> OrderedDict:
+    """Generate one 2D annotation record given various informations on top of
+    the 2D bounding box coordinates.
+
+    Args:
+        ann_rec (dict): Original 3d annotation record.
+        x1 (float): Minimum value of the x coordinate.
+        y1 (float): Minimum value of the y coordinate.
+        x2 (float): Maximum value of the x coordinate.
+        y2 (float): Maximum value of the y coordinate.
+        sample_data_token (str): Sample data token.
+        filename (str):The corresponding image file where the annotation
+            is present.
+
+    Returns:
+        dict: A sample 2D annotation record.
+            - file_name (str): flie name
+            - image_id (str): sample data token
+            - area (float): 2d box area
+            - category_name (str): category name
+            - category_id (int): category id
+            - bbox (list[float]): left x, top y, dx, dy of 2d box
+            - iscrowd (int): whether the area is crowd
+    """
+    repro_rec = OrderedDict()
+    repro_rec["sample_data_token"] = sample_data_token
+    coco_rec = dict()
+
+    relevant_keys = [
+        "attribute_tokens",
+        "category_name",
+        "instance_token",
+        "next",
+        "num_lidar_pts",
+        "num_radar_pts",
+        "prev",
+        "sample_annotation_token",
+        "sample_data_token",
+        "visibility_token",
+    ]
+
+    for key, value in ann_rec.items():
+        if key in relevant_keys:
+            repro_rec[key] = value
+
+    repro_rec["bbox_corners"] = [x1, y1, x2, y2]
+    repro_rec["filename"] = filename
+
+    coco_rec["file_name"] = filename
+    coco_rec["image_id"] = sample_data_token
+    coco_rec["area"] = (y2 - y1) * (x2 - x1)
+
+    if repro_rec["category_name"] not in NuScenesDataset.NameMapping:
+        return None
+    cat_name = NuScenesDataset.NameMapping[repro_rec["category_name"]]
+    coco_rec["category_name"] = cat_name
+    coco_rec["category_id"] = nus_categories.index(cat_name)
+    coco_rec["bbox"] = [x1, y1, x2 - x1, y2 - y1]
+    coco_rec["iscrowd"] = 0
+
+    return coco_rec
