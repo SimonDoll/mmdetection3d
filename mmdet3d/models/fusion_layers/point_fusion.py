@@ -245,9 +245,6 @@ class PointFusion(nn.Module):
         Returns:
             torch.Tensor: Fused features of each point.
         """
-        print("img metas =", img_metas)
-        # print("pts =", pts.shape)
-        print("img feats =", img_feats.shape)
 
         img_pts = self.obtain_mlvl_feats(img_feats, pts, img_metas)
         img_pre_fuse = self.img_transform(img_pts)
@@ -290,7 +287,7 @@ class PointFusion(nn.Module):
             for level in range(len(self.img_levels)):
                 mlvl_img_feats.append(
                     self.sample_single(
-                        img_ins[level][i : i + 1], pts[i][:, :3], img_metas[i]
+                        img_ins[level][i: i + 1], pts[i][:, :3], img_metas[i]
                     )
                 )
             mlvl_img_feats = torch.cat(mlvl_img_feats, dim=-1)
@@ -329,7 +326,8 @@ class PointFusion(nn.Module):
             if "scale_factor" in img_meta.keys()
             else 1
         )
-        pcd_flip = img_meta["pcd_flip"] if "pcd_flip" in img_meta.keys() else False
+        pcd_flip = img_meta["pcd_flip"] if "pcd_flip" in img_meta.keys(
+        ) else False
         img_flip = img_meta["flip"] if "flip" in img_meta.keys() else False
         img_crop_offset = (
             pts.new_tensor(img_meta["img_crop_offset"])

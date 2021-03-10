@@ -30,6 +30,7 @@ from .loading_point_augmentation import AugmentPrevPointsWithImageFeatures
 from .loading_custom import LoadPrevPointsFromFile
 
 from .loading_custom import AccumulatePointClouds
+from .loading_img_features import ExtractFrontImageToKittiFormat
 
 __all__ = [
     "ObjectSample",
@@ -59,4 +60,5 @@ __all__ = [
     "LoadPrevPointsFromFile",
     "LoadPrevMultiViewImagesFromFile",
     "AccumulatePointClouds",
+    "ExtractFrontImageToKittiFormat",
 ]
