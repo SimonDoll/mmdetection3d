@@ -1,6 +1,6 @@
 import mmcv
 import numpy as np
-import os
+import random
 from collections import OrderedDict
 
 from os import path as osp
@@ -8,6 +8,7 @@ from pyquaternion import Quaternion
 from shapely.geometry import MultiPoint, box
 from typing import List, Tuple, Union
 import pathlib
+import math
 import json
 
 
@@ -26,7 +27,7 @@ test_set_folder_name = "test"
 
 
 def create_carla_infos(
-    root_path, info_prefix, max_prev_samples=10
+    root_path, info_prefix, max_prev_samples=10, seed=42, balance={'visible': 0.9, 'non_visible': 0.1}
 ):
     """Create info file of a carla generated dataset.
 
@@ -41,6 +42,10 @@ def create_carla_infos(
             Default: 10
     """
 
+    # make deterministic
+    if seed:
+        random.seed(seed)
+
     # check wether splits are available
     root_path = pathlib.Path(root_path)
 
@@ -52,15 +57,15 @@ def create_carla_infos(
     # train set
     train_set = root_path.joinpath(train_set_folder_name)
     train_infos, train_meta = _run_for_set(
-        train_set, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
+        train_set, balance, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names, )
     # val set
     val_set = root_path.joinpath(val_set_folder_name)
     val_infos, val_meta = _run_for_set(
-        val_set, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
+        val_set, balance, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
     # test set
     test_set = root_path.joinpath(test_set_folder_name)
     test_infos, test_meta = _run_for_set(
-        test_set, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
+        test_set, balance, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
 
     print("train samples: {}".format(len(train_infos)))
     data = dict(infos=train_infos, metadata=train_meta)
@@ -81,12 +86,50 @@ def create_carla_infos(
     mmcv.dump(data, info_path)
 
 
-def _run_for_set(set_folder, max_prev_samples=10, lidar_name="lidar_top", ego_pose_sensor_name="imu_perfect", camera_names=["cam_front"]):
+def _split_infos(sample_infos):
+    infos_with_visible = []
+    infos_without_visible = []
+
+    for info in sample_infos:
+        gts = info['gt_boxes']
+        if len(gts) > 0:
+            infos_with_visible.append(info)
+        else:
+            infos_without_visible.append(info)
+    return infos_with_visible, infos_without_visible
+
+
+def _apply_balancing(sample_infos, balance):
+    vis = balance['visible']
+    non_vis = balance['non_visible']
+
+    assert math.isclose(vis + non_vis, 1.0), "balance needs to sum to 1"
+
+    infos_vis, infos_non_vis = _split_infos(sample_infos)
+
+    # we want to use as much data with boxes as possible
+    # vis * len() == 100% * fraction ->
+    amount_non_visible = (vis * len(infos_vis)) * non_vis
+
+    assert len(infos_non_vis) >= amount_non_visible, "too few non annotated frames"
+
+    infos_non_vis = random.sample(infos_non_vis, int(amount_non_visible))
+
+    print("infos vis =", len(infos_vis), "infos non vis =", len(infos_non_vis))
+
+    # now merge the infos
+    all_infos = infos_vis + infos_non_vis
+    return all_infos
+
+
+def _run_for_set(set_folder, balance, max_prev_samples=10, lidar_name="lidar_top", ego_pose_sensor_name="imu_perfect", camera_names=["cam_front"]):
 
     loader = DatasetLoader(set_folder)
     loader.setup()
     sample_infos = _fill_scene_infos(
         loader, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
+
+    sample_infos = _apply_balancing(sample_infos, balance)
 
     return sample_infos, loader.dataset_meta
 
