@@ -143,7 +143,11 @@ class CarlaDataset(Custom3DDataset):
             list[dict]: List of annotations sorted by timestamps.
         """
         data = mmcv.load(ann_file)
-        data_infos = list(sorted(data["infos"], key=lambda e: e["timestamp"]))
+
+        # data_infos = list(sorted(data["infos"], key=lambda e: e["timestamp"]))
+
+        data_infos = list(data["infos"])
+
         data_infos = data_infos[:: self.load_interval]
         return data_infos
 
