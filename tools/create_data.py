@@ -123,9 +123,21 @@ def carla_data_prep(root_path, info_prefix, version, dataset_name, out_dir, max_
 
     import pathlib
     info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
-    set_folder = pathlib.Path(root_path).joinpath(
+    train_set_folder = pathlib.Path(root_path).joinpath(
         carla_data_converter.train_set_folder_name)
-    carla_data_converter.export_2d_annotation(set_folder, info_train_path)
+    carla_data_converter.export_2d_annotation(
+        train_set_folder, info_train_path)
+
+    info_val_path = osp.join(root_path, f"{info_prefix}_infos_val.pkl")
+    val_set_folder = pathlib.Path(root_path).joinpath(
+        carla_data_converter.val_set_folder_name)
+    carla_data_converter.export_2d_annotation(val_set_folder, info_val_path)
+
+    info_test_path = osp.join(root_path, f"{info_prefix}_infos_test.pkl")
+    test_set_folder = pathlib.Path(root_path).joinpath(
+        carla_data_converter.test_set_folder_name)
+    carla_data_converter.export_2d_annotation(
+        test_set_folder, info_test_path)
 
 
 def lyft_data_prep(

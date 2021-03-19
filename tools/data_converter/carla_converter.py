@@ -2,8 +2,7 @@ import mmcv
 import numpy as np
 import os
 from collections import OrderedDict
-from nuscenes.nuscenes import NuScenes
-from nuscenes.utils.geometry_utils import view_points
+
 from os import path as osp
 from pyquaternion import Quaternion
 from shapely.geometry import MultiPoint, box
@@ -11,12 +10,15 @@ from typing import List, Tuple, Union
 import pathlib
 import json
 
+
 from dataset_3d.data_loaders.dataset_loader import DatasetLoader
 from dataset_3d.data_structures.dataset import Dataset
 import dataset_3d.utils.loading_utils as loading_utils
 
+from mmdet3d.datasets.carla_dataset import CarlaDataset
+
 carla_categories = (
-    "lost_cargo"
+    "lost_cargo",
 )
 train_set_folder_name = "train"
 val_set_folder_name = "val"
@@ -372,23 +374,22 @@ def export_2d_annotation(set_folder, info_path, ego_pose_sensor_name="imu_perfec
         dict(id=carla_categories.index(cat_name), name=cat_name)
         for cat_name in carla_categories
     ]
+
     coco_ann_id = 0
     coco_2d_dict = dict(annotations=[], images=[], categories=cat2Ids)
     i = 0
     for info in mmcv.track_iter_progress(carla_infos):
-        if len(info['gt_boxes']) == 0:
-            continue
-
         i += 1
-
-        if i < 15:
-            continue
-
+        if i > 10:
+            break
         for cam in camera_names:
             cam_info = info["cams"][cam]
 
             img_path = cam_info["data_path"]
 
+            # get img path relative to dataset root
+            img_path = str(pathlib.Path(
+                img_path).relative_to(loader.dataset_root))
             coco_infos = get_2d_boxes(
                 loader,
                 info["token"],
@@ -398,13 +399,10 @@ def export_2d_annotation(set_folder, info_path, ego_pose_sensor_name="imu_perfec
                 camera_calibs[cam],
                 img_path
             )
-            print("img =", cam_info["data_path"])
-
-            exit(0)
             (height, width, _) = mmcv.imread(cam_info["data_path"]).shape
             coco_2d_dict["images"].append(
                 dict(
-                    file_name=cam_info["data_path"],
+                    file_name=img_path,
                     id=info["token"],
                     width=width,
                     height=height,
@@ -418,7 +416,7 @@ def export_2d_annotation(set_folder, info_path, ego_pose_sensor_name="imu_perfec
                 coco_info["id"] = coco_ann_id
                 coco_2d_dict["annotations"].append(coco_info)
                 coco_ann_id += 1
-    mmcv.dump(coco_2d_dict, f"{info_path[:-4]}.coco.json")
+    mmcv.dump(coco_2d_dict, f"{info_path[:-4]}.coco.json", indent=4)
 
 
 def _get_obb_corners(obb_center, obb_rotation, obb_extent):
@@ -472,9 +470,6 @@ def get_2d_boxes(
     ego_pose_sensor_data = loading_utils.load_sensor_data(
         loader, sample, ego_pose_sensor)
 
-    camera_sensor_data = loading_utils.load_sensor_data(
-        loader, sample, camera_sensor)
-
     # we need the transform from world -> camera coords
     # get the ego pose
     ego_T_ego_pose_sensor = ego_pose_calib.transform
@@ -495,6 +490,10 @@ def get_2d_boxes(
 
         annotation = loader.get_annotation(anno_token)
 
+        # get the category
+        category_token = annotation.category_token
+        category_name = loader.get_category(category_token).name
+
         anno_center, anno_rotation = _transform_to_translation_rotation(
             annotation.transform)
         box_corners_3d = _get_obb_corners(
@@ -514,7 +513,8 @@ def get_2d_boxes(
             cords_2d = np.dot(camera_calib.camera_intrinsic, cords_3d)
 
             # normalize by depth (add epsilon for numeric stability)
-            cords_2d[2] += np.finfo(float).eps
+            cords_2d[2] = np.clip(
+                cords_2d[2], a_min=np.finfo(float).eps, a_max=None)
             cords_2d /= cords_2d[2]
             corners_2d.append(cords_2d)
 
@@ -529,8 +529,8 @@ def get_2d_boxes(
             min_x, min_y, max_x, max_y = final_coords
 
         # Generate dictionary record to be included in the .json file.
-        repro_rec = generate_record(min_x, min_y, max_x, max_y, sample_token, img_path
-                                    )
+        repro_rec = generate_record(
+            category_name, min_x, min_y, max_x, max_y, sample_token, img_path)
         repro_recs.append(repro_rec)
 
     return repro_recs
@@ -571,7 +571,7 @@ def post_process_coords(
 
 
 def generate_record(
-    ann_rec: dict,
+    category_name: str,
     x1: float,
     y1: float,
     x2: float,
@@ -583,7 +583,7 @@ def generate_record(
     the 2D bounding box coordinates.
 
     Args:
-        ann_rec (dict): Original 3d annotation record.
+        category_name (str): Name of category.
         x1 (float): Minimum value of the x coordinate.
         y1 (float): Minimum value of the y coordinate.
         x2 (float): Maximum value of the x coordinate.
@@ -602,39 +602,14 @@ def generate_record(
             - bbox (list[float]): left x, top y, dx, dy of 2d box
             - iscrowd (int): whether the area is crowd
     """
-    repro_rec = OrderedDict()
-    repro_rec["sample_data_token"] = sample_data_token
     coco_rec = dict()
-
-    relevant_keys = [
-        "attribute_tokens",
-        "category_name",
-        "instance_token",
-        "next",
-        "num_lidar_pts",
-        "num_radar_pts",
-        "prev",
-        "sample_annotation_token",
-        "sample_data_token",
-        "visibility_token",
-    ]
-
-    for key, value in ann_rec.items():
-        if key in relevant_keys:
-            repro_rec[key] = value
-
-    repro_rec["bbox_corners"] = [x1, y1, x2, y2]
-    repro_rec["filename"] = filename
 
     coco_rec["file_name"] = filename
     coco_rec["image_id"] = sample_data_token
     coco_rec["area"] = (y2 - y1) * (x2 - x1)
 
-    if repro_rec["category_name"] not in NuScenesDataset.NameMapping:
-        return None
-    cat_name = NuScenesDataset.NameMapping[repro_rec["category_name"]]
-    coco_rec["category_name"] = cat_name
-    coco_rec["category_id"] = nus_categories.index(cat_name)
+    coco_rec["category_name"] = category_name
+    coco_rec["category_id"] = carla_categories.index(category_name)
     coco_rec["bbox"] = [x1, y1, x2 - x1, y2 - y1]
     coco_rec["iscrowd"] = 0
 
