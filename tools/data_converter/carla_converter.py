@@ -377,11 +377,8 @@ def export_2d_annotation(set_folder, info_path, ego_pose_sensor_name="imu_perfec
 
     coco_ann_id = 0
     coco_2d_dict = dict(annotations=[], images=[], categories=cat2Ids)
-    i = 0
     for info in mmcv.track_iter_progress(carla_infos):
-        i += 1
-        if i > 10:
-            break
+
         for cam in camera_names:
             cam_info = info["cams"][cam]
 

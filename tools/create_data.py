@@ -110,16 +110,16 @@ def extended_nuscenes_data_prep(
 
 
 def carla_data_prep(root_path, info_prefix, version, dataset_name, out_dir, max_prev_samples=10):
-    # carla_data_converter.create_carla_infos(
-    #     root_path, info_prefix, max_prev_samples=max_prev_samples
-    # )
+    carla_data_converter.create_carla_infos(
+        root_path, info_prefix, max_prev_samples=max_prev_samples
+    )
 
-    # info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
-    # info_val_path = osp.join(root_path, f"{info_prefix}_infos_val.pkl")
+    info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
+    info_val_path = osp.join(root_path, f"{info_prefix}_infos_val.pkl")
 
-    # create_groundtruth_database(
-    #     dataset_name, root_path, info_prefix, f"{out_dir}/{info_prefix}_infos_train.pkl"
-    # )
+    create_groundtruth_database(
+        dataset_name, root_path, info_prefix, f"{out_dir}/{info_prefix}_infos_train.pkl"
+    )
 
     import pathlib
     info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
