@@ -129,7 +129,8 @@ def _run_for_set(set_folder, balance, max_prev_samples=10, lidar_name="lidar_top
     sample_infos = _fill_scene_infos(
         loader, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
 
-    sample_infos = _apply_balancing(sample_infos, balance)
+    if balance is not None:
+        sample_infos = _apply_balancing(sample_infos, balance)
 
     return sample_infos, loader.dataset_meta
 

@@ -111,7 +111,7 @@ def extended_nuscenes_data_prep(
 
 def carla_data_prep(root_path, info_prefix, version, dataset_name, out_dir, max_prev_samples=10):
     carla_data_converter.create_carla_infos(
-        root_path, info_prefix, max_prev_samples=max_prev_samples
+        root_path, info_prefix, max_prev_samples=max_prev_samples, balance=None
     )
 
     info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
