@@ -10,6 +10,44 @@ from mmdet3d.core.points import BasePoints, get_points_type
 
 
 @PIPELINES.register_module()
+class RGBA2RGB:
+    """Removes transparency dimension from images"""
+
+    def __init__(
+        self,
+    ):
+        pass
+
+    def __call__(self, results):
+
+        # imgs are loaded
+        # h  x w x channels x cameras
+        # -> channels [0:3] are rgb
+        results['img'] = results['img'][:, :, 0:3, :]
+        # tuple to list
+        img_shape = list(results['img_shape'])
+        img_shape[2] = 3  # 3 channels only
+        img_shape = tuple(img_shape)
+
+        results['img_shape'] = img_shape
+
+        # tuple to list
+        ori_shape = list(results['ori_shape'])
+        ori_shape[2] = 3  # 3 channels only
+        ori_shape = tuple(ori_shape)
+
+        results['ori_shape'] = ori_shape
+
+        # tuple to list
+        pad_shape = list(results['pad_shape'])
+        pad_shape[2] = 3  # 3 channels only
+        pad_shape = tuple(pad_shape)
+
+        results['pad_shape'] = pad_shape
+        return results
+
+
+@PIPELINES.register_module()
 class ExtractFrontImageToKittiFormat:
     """Adds image rgb features to a pointcloud"""
 
