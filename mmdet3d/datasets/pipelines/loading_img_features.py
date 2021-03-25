@@ -19,7 +19,6 @@ class RGBA2RGB:
         pass
 
     def __call__(self, results):
-
         # imgs are loaded
         # h  x w x channels x cameras
         # -> channels [0:3] are rgb
@@ -44,6 +43,13 @@ class RGBA2RGB:
         pad_shape = tuple(pad_shape)
 
         results['pad_shape'] = pad_shape
+
+        # the img norm config also needs to be reduced to 3D
+        norm_cfg = results['img_norm_cfg']
+        norm_cfg['mean'] = norm_cfg['mean'][0:3]
+        norm_cfg['std'] = norm_cfg['mean'][0:3]
+        results['img_norm_cfg'] = norm_cfg
+        
         return results
 
 
