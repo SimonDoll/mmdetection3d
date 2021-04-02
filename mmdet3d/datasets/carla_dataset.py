@@ -67,6 +67,7 @@ class CarlaDataset(Custom3DDataset):
         filter_empty_gt=False,
         test_mode=False,
         with_velocity=True,
+        eval_point_cloud_range=None
     ):
         self.load_interval = load_interval
         super().__init__(
@@ -87,6 +88,12 @@ class CarlaDataset(Custom3DDataset):
             )
 
         self._with_velocity = with_velocity
+
+        if eval_point_cloud_range is not None:
+            assert isinstance(eval_point_cloud_range, list)
+            assert len(eval_point_cloud_range) == 6
+
+        self._eval_point_cloud_range = eval_point_cloud_range
 
         # setup the metric pipeline for evaluation
         # we use class ids for matching, cat2id can be used to assign a category name later on
@@ -149,6 +156,7 @@ class CarlaDataset(Custom3DDataset):
         data_infos = list(data["infos"])
 
         data_infos = data_infos[:: self.load_interval]
+
         return data_infos
 
     def info_to_input_dict(self, info):
@@ -284,6 +292,31 @@ class CarlaDataset(Custom3DDataset):
         )
         return anns_results
 
+    def _gt_range_filter(self, gt_annos):
+        filtered_gt_annos = []
+        for frame_annos in gt_annos:
+            boxes = frame_annos['gt_bboxes_3d']
+
+            # bev range is x_min, x_max, y_min, y_max
+            bev_range = [self._eval_point_cloud_range[0], self._eval_point_cloud_range[1],
+                         self._eval_point_cloud_range[3], self._eval_point_cloud_range[4]]
+
+            boxes_mask = boxes.in_range_bev(bev_range)
+
+            boxes = boxes[boxes_mask]
+
+            boxes_mask = boxes_mask.numpy()
+
+            labels = frame_annos['gt_labels_3d'][boxes_mask]
+
+            names = frame_annos['gt_names'][boxes_mask]
+
+            filtered_frame_annos = dict(
+                gt_bboxes_3d=boxes, gt_labels_3d=labels, gt_names=names)
+
+            filtered_gt_annos.append(filtered_frame_annos)
+        return filtered_gt_annos
+
     def eval_preprocess(self, results):
         # the results are in the order of the data_infos, but do not contain annos as the eval hook
         # for the carla datasets no "fixed test set exists".
@@ -292,6 +325,10 @@ class CarlaDataset(Custom3DDataset):
 
         # collect the gt data
         gt_annos = [self.get_ann_info(i) for i in range(len(results))]
+
+        if self._eval_point_cloud_range is not None:
+            # filter out of range bboxes
+            gt_annos = self._gt_range_filter(gt_annos)
 
         matching_results_with_annotations = {
             c: [] for c in self.cat2id.values()}
@@ -376,6 +413,10 @@ class CarlaDataset(Custom3DDataset):
             non_annotated_frames_count))
         self.metric_pipeline_non_annoated.print_results(
             metric_results_non_annoated)
+
+        if self._eval_point_cloud_range:
+            print("Used eval range (bev, centers): {}".format(
+                self._eval_point_cloud_range))
 
         results_numeric_all = {}
         # for now only collect single numeric results of annotated frames
