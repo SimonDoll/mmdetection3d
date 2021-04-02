@@ -339,9 +339,9 @@ class CarlaDataset(Custom3DDataset):
         non_annotated_frames_count = 0
         for i, res in enumerate(results):
 
-            pred_boxes = res['pts_bbox']['boxes_3d']
-            pred_scores = res['pts_bbox']['scores_3d']
-            pred_labels = res['pts_bbox']['labels_3d']
+            pred_boxes = res['boxes_3d']
+            pred_scores = res['scores_3d']
+            pred_labels = res['labels_3d']
 
             gt_boxes = gt_annos[i]['gt_bboxes_3d']
             gt_labels = gt_annos[i]['gt_labels_3d']
@@ -384,16 +384,11 @@ class CarlaDataset(Custom3DDataset):
 
         return matching_results_with_annotations, annotated_frames_count, annotation_count, matching_results_no_annotations, non_annotated_frames_count
 
-    def evaluate(
-        self,
-        results,
-        metric="bbox",
-        logger=None,
-        jsonfile_prefix=None,
-        result_names=["pts_bbox"],
-        show=False,
-        out_dir=None,
-    ):
+    def evaluate_sinlge(self, results):
+
+        assert isinstance(results, list)
+        assert len(results) == len(
+            self), "Result length does not fit dataset length!"
         matching_results_with_annotations, annotated_frames_count, annotation_count, matching_results_no_annotations, non_annotated_frames_count = self.eval_preprocess(
             results)
 
@@ -418,13 +413,47 @@ class CarlaDataset(Custom3DDataset):
             print("Used eval range (bev, centers): {}".format(
                 self._eval_point_cloud_range))
 
-        results_numeric_all = {}
+        results_numeric_logging = {}
         # for now only collect single numeric results of annotated frames
         for metric_name, metric_return in metric_results_annotated.items():
             if isinstance(metric_return, NumericMetricResult):
-                results_numeric_all[metric_name] = float(metric_return())
+                results_numeric_logging[metric_name] = float(metric_return())
+        return results_numeric_logging
 
-        return results_numeric_all
+    def evaluate(
+        self,
+        results,
+        metric="bbox",
+        logger=None,
+        jsonfile_prefix=None,
+        result_names=["pts_bbox"],
+        show=False,
+        out_dir=None,
+    ):
+
+        print("result[0] =", results[0])
+
+        # the results can either be [{bboxes, labels, scores},..]
+        # or nested: [{pts_bbox: {bboxes,..}}]
+
+        is_nested = all(name in results[0] for name in result_names)
+
+        if is_nested:
+            results_logging = {}
+            for nested_key in result_names:
+                print("Evaluating boxes of {}".format(nested_key))
+                # collect the results for this branch e.g. pts branch
+                results_nested = list(
+                    map(lambda res: res[nested_key], results))
+                results_current_logging = self.evaluate_sinlge(results_nested)
+                # logger does not support nested dicts -> append key with its result branch
+                for k, v in results_current_logging.items():
+                    results_logging[nested_key + "_" + k] = v
+
+        else:
+            results_logging = self.evaluate_sinlge(results)
+
+        return results_logging
 
     def show(self, results, out_dir):
         raise NotImplementedError
