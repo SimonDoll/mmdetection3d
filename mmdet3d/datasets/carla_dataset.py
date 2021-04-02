@@ -161,10 +161,12 @@ class CarlaDataset(Custom3DDataset):
 
         if self.modality["use_camera"]:
             image_paths = []
+            cam_names = []
             img_T_lidar_list = []
-            for _, cam_info in info["cams"].items():
+            for cam_name, cam_info in info["cams"].items():
 
                 image_paths.append(cam_info["data_path"])
+                cam_names.append(cam_name)
                 # obtain lidar to image transformation matrix
                 lidar_T_cam = np.eye(4)
                 lidar_T_cam[:3, :3] = cam_info["lidar_R_sensor"]
@@ -187,6 +189,7 @@ class CarlaDataset(Custom3DDataset):
                 dict(
                     img_filename=image_paths,
                     img_T_lidar=img_T_lidar_list,
+                    camera_names=cam_names
                 )
             )
         return input_dict

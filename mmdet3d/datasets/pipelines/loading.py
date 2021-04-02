@@ -191,7 +191,7 @@ class LoadPointsFromMultiSweeps(object):
             else:
                 # randomly select sweeps
                 choices = np.random.choice(
-                    len(results["sweeps"]), self.sweeps_num, replace=False
+                    len(results["prev"]), self.sweeps_num, replace=False
                 )
             for idx in choices:
                 prev = results["prev"][idx]
@@ -284,10 +284,15 @@ class NormalizePointsColor(object):
 
     Args:
         color_mean (list[float]): Mean color of the point cloud.
+        color_start_dim (int): First dimension of color e.g. Red channel
+        color_end_dim (int): Last dimension of color e.g. Blue channel
     """
 
-    def __init__(self, color_mean):
+    def __init__(self, color_mean, color_start_dim=3, color_end_dim=5):
         self.color_mean = color_mean
+
+        self.color_start_dim = color_start_dim
+        self.color_end_dim = color_end_dim
 
     def __call__(self, results):
         """Call function to normalize color of points.
@@ -305,7 +310,8 @@ class NormalizePointsColor(object):
         assert (
             points.shape[1] >= 6
         ), f"Expect points have channel >=6, got {points.shape[1]}"
-        points[:, 3:6] = points[:, 3:6] - np.array(self.color_mean) / 256.0
+        points[:, 3:6] = points[:, self.color_start_dim:self.color_end_dim +
+                                1] - np.array(self.color_mean) / 256.0
         results["points"] = points
         return results
 
