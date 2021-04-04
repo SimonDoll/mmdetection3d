@@ -431,8 +431,6 @@ class CarlaDataset(Custom3DDataset):
         out_dir=None,
     ):
 
-        print("result[0] =", results[0])
-
         # the results can either be [{bboxes, labels, scores},..]
         # or nested: [{pts_bbox: {bboxes,..}}]
 
