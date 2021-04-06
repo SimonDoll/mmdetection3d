@@ -35,6 +35,8 @@ class AugmentPointsWithImageFeatures:
             assert filter_close >= 0.0
         self._filter_close = filter_close
 
+        self.count = 0
+
     def __call__(self, results):
         points = results["points"].tensor
         device = points.device
@@ -112,6 +114,7 @@ class AugmentPointsWithImageFeatures:
 
             if self._filter_close:
                 valid_points_mask = torch.logical_and(mask_x, mask_y)
+
                 mask_z = projected_points[:, 2] > self._filter_close
                 valid_points_mask = torch.logical_and(
                     valid_points_mask, mask_z)
@@ -125,13 +128,14 @@ class AugmentPointsWithImageFeatures:
             img_row_idxs = projected_points[:, 0].long()
             img_col_idxs = projected_points[:, 1].long()
 
-            # self._debug_visualize(
-            #     img,
-            #     projected_points[:, 0].long(),
-            #     projected_points[:, 1].long(),
-            #     projected_points[:, 2],
-            #     img_idx,
-            # )
+            # print("here")
+            self._debug_visualize(
+                img,
+                projected_points[:, 0].long(),
+                projected_points[:, 1].long(),
+                projected_points[:, 2],
+                img_idx,
+            )
 
             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
@@ -164,7 +168,8 @@ class AugmentPointsWithImageFeatures:
         plt.imshow(img, zorder=1)
         plt.scatter(xs, ys, zorder=2, s=0.4, c=zs)
 
-        plt.savefig("/workspace/work_dirs/plot" + str(idx) + ".png")
+        self.count += 1
+        plt.savefig("/workspace/work_dirs/plot/" + str(self.count) + ".png")
         plt.clf()
 
 

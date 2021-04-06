@@ -142,3 +142,91 @@ class PointsToDepthMap:
 
         plt.savefig("/workspace/work_dirs/plot/" + str(idx) + ".png")
         plt.clf()
+
+
+@PIPELINES.register_module()
+class DepthMapToPoints:
+    """Converts multiple depth maps a point cloud"""
+
+    def __init__(
+        self,
+        coord_type="LIDAR",
+    ):
+        # TODO how to deal with overlapping images?
+        self._coord_type = coord_type
+
+    def __call__(self, results):
+
+        points = results["points"].tensor
+        device = points.device
+        img_T_lidar_tfs = (
+            torch.tensor(
+                results["img_T_lidar"],
+            )
+            .to(device)
+            .float()
+        )
+
+        # h x w x 1 x cameras
+        depth_maps = results["depth_maps"]
+
+        # cams x w x h x 1
+        depth_maps = depth_maps.permute(3, 1, 0, 2)
+
+        points = []
+        for img_idx in range(len(img_T_lidar_tfs)):
+            img_T_lidar = img_T_lidar_tfs[img_idx]
+
+            depth_map = depth_maps[img_idx]
+            # remove extra depth channel
+            depth_map = depth_map.squeeze()
+
+            # create a point cloud from the pixels
+            # get the valid pixel coordinates
+            # all pixels with depth != 0 are valid
+
+            valid_idxs = torch.nonzero(depth_map)
+
+            points_img_plane = torch.ones((len(valid_idxs), 3))
+
+            valid_x_idxs = valid_idxs[:, 0]
+            valid_y_idxs = valid_idxs[:, 1]
+
+            valid_depth_values = depth_map[valid_x_idxs, valid_y_idxs]
+
+            # create the points for back projection
+            points_img_plane = torch.ones((len(valid_depth_values), 4))
+            points_img_plane[:, 0] = valid_x_idxs
+            points_img_plane[:, 1] = valid_y_idxs
+
+            # for back projection we need points (u,v,1, 1/z)
+            # because a point (x,y,z,1) is projected to (u,v,1,1/z)
+            # store the inverted depth (valid because depth was forced to non zero values beforehand)
+            points_img_plane[:, 3] = 1.0 / valid_depth_values
+
+            print("pts img plane = \n", points_img_plane[0:10])
+
+            lidar_T_img = torch.inverse(img_T_lidar)
+
+            # transform all points on the img plane of the currently selected img
+
+            # use the theorem:
+            # if points would have been 4 x 1 (single point)
+            # (Img_mat . Points)^T = Points^T . Img_mat^T
+            # (4 x 4 . 4 x 1)^T = (1 x 4) . (4 x 4) -> 1 x 4
+            # this can be generalized for n points
+            # points is n x 4 already (no need to transpose)
+            points_lidar = points_img_plane @ lidar_T_img.T
+            points_lidar *= torch.unsqueeze(valid_depth_values, dim=-1)
+
+            points.append(points_lidar[:, 0:3])
+
+        points = torch.cat(points, dim=-1)
+
+        points_class = get_points_type(self._coord_type)
+        points = points_class(
+            points, points_dim=points.shape[-1], attribute_dims=None)
+
+        results['points'] = points
+
+        return results
