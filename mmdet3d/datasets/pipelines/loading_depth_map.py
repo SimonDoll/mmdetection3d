@@ -203,9 +203,6 @@ class DepthMapToPoints:
             # because a point (x,y,z,1) is projected to (u,v,1,1/z)
             # store the inverted depth (valid because depth was forced to non zero values beforehand)
             points_img_plane[:, 3] = 1.0 / valid_depth_values
-
-            print("pts img plane = \n", points_img_plane[0:10])
-
             lidar_T_img = torch.inverse(img_T_lidar)
 
             # transform all points on the img plane of the currently selected img
