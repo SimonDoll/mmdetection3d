@@ -18,7 +18,7 @@ class AugmentPointsWithImageFeatures:
         filter_non_matched=True,
         coord_type="LIDAR",
         use_dim=[0, 1, 2, 3],
-        filter_close=1.0,
+        filter_close=0.5,
     ):
         """
         Args:
@@ -70,7 +70,8 @@ class AugmentPointsWithImageFeatures:
 
         # create the result array to store the colored points in
         # n x color channels
-        points_colors = torch.zeros((len(points), imgs.shape[-1]), dtype=imgs.dtype)
+        points_colors = torch.zeros(
+            (len(points), imgs.shape[-1]), dtype=imgs.dtype)
 
         # make points a row vector n x 4 x 1
         # (enables us to use batch matrix multiplication)
@@ -101,16 +102,19 @@ class AugmentPointsWithImageFeatures:
             # create a mask of valid points
             # valid means that the points lie inside the image x y borders, z is not filtered here
             mask_x = torch.logical_and(
-                projected_points[:, 0] > 0, projected_points[:, 0] < img.shape[0]
+                projected_points[:,
+                                 0] > 0, projected_points[:, 0] < img.shape[0]
             )
             mask_y = torch.logical_and(
-                projected_points[:, 1] > 0, projected_points[:, 1] < img.shape[1]
+                projected_points[:,
+                                 1] > 0, projected_points[:, 1] < img.shape[1]
             )
 
             if self._filter_close:
                 valid_points_mask = torch.logical_and(mask_x, mask_y)
                 mask_z = projected_points[:, 2] > self._filter_close
-                valid_points_mask = torch.logical_and(valid_points_mask, mask_z)
+                valid_points_mask = torch.logical_and(
+                    valid_points_mask, mask_z)
 
             else:
                 valid_points_mask = torch.logical_and(mask_x, mask_y)
@@ -143,7 +147,8 @@ class AugmentPointsWithImageFeatures:
         points = torch.cat((valid_points, valid_point_colors), dim=1)
         points_class = get_points_type(self._coord_type)
         # TODO attributes
-        points = points_class(points, points_dim=points.shape[-1], attribute_dims=None)
+        points = points_class(
+            points, points_dim=points.shape[-1], attribute_dims=None)
         # print("new dim =", points.points_dim)
         results["points"] = points
         return results
@@ -237,7 +242,8 @@ class AugmentPrevPointsWithImageFeatures:
 
         # create the result array to store the colored points in
         # n x color channels
-        points_colors = torch.zeros((len(points), imgs.shape[-1]), dtype=imgs.dtype)
+        points_colors = torch.zeros(
+            (len(points), imgs.shape[-1]), dtype=imgs.dtype)
 
         # make points a row vector n x 4 x 1
         # (enables us to use batch matrix multiplication)
@@ -268,16 +274,19 @@ class AugmentPrevPointsWithImageFeatures:
             # create a mask of valid points
             # valid means that the points lie inside the image x y borders, z is not filtered here
             mask_x = torch.logical_and(
-                projected_points[:, 0] > 0, projected_points[:, 0] < img.shape[0]
+                projected_points[:,
+                                 0] > 0, projected_points[:, 0] < img.shape[0]
             )
             mask_y = torch.logical_and(
-                projected_points[:, 1] > 0, projected_points[:, 1] < img.shape[1]
+                projected_points[:,
+                                 1] > 0, projected_points[:, 1] < img.shape[1]
             )
 
             if self._filter_close:
                 valid_points_mask = torch.logical_and(mask_x, mask_y)
                 mask_z = projected_points[:, 2] > self._filter_close
-                valid_points_mask = torch.logical_and(valid_points_mask, mask_z)
+                valid_points_mask = torch.logical_and(
+                    valid_points_mask, mask_z)
 
             else:
                 valid_points_mask = torch.logical_and(mask_x, mask_y)

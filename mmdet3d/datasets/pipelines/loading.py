@@ -279,50 +279,6 @@ class PointSegClassMapping(object):
 
 
 @ PIPELINES.register_module()
-class NormalizePointsColor(object):
-    """Normalize color of points.
-
-    Args:
-        color_mean (list[float]): Mean color of the point cloud.
-        color_start_dim (int): First dimension of color e.g. Red channel
-        color_end_dim (int): Last dimension of color e.g. Blue channel
-    """
-
-    def __init__(self, color_mean, color_start_dim=3, color_end_dim=5):
-        self.color_mean = color_mean
-
-        self.color_start_dim = color_start_dim
-        self.color_end_dim = color_end_dim
-
-    def __call__(self, results):
-        """Call function to normalize color of points.
-
-        Args:
-            results (dict): Result dict containing point clouds data.
-
-        Returns:
-            dict: The result dict containing the normalized points. \
-                Updated key and value are described below.
-
-                - points (np.ndarray): Points after color normalization.
-        """
-        points = results["points"]
-        assert (
-            points.shape[1] >= 6
-        ), f"Expect points have channel >=6, got {points.shape[1]}"
-        points[:, 3:6] = points[:, self.color_start_dim:self.color_end_dim +
-                                1] - np.array(self.color_mean) / 256.0
-        results["points"] = points
-        return results
-
-    def __repr__(self):
-        """str: Return a string that describes the module."""
-        repr_str = self.__class__.__name__
-        repr_str += "(color_mean={})".format(self.color_mean)
-        return repr_str
-
-
-@ PIPELINES.register_module()
 class LoadPointsFromFile(object):
     """Load Points From File.
 

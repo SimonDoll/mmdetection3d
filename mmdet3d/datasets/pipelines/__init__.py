@@ -6,7 +6,6 @@ from .loading import (
     LoadMultiViewImageFromFiles,
     LoadPointsFromFile,
     LoadPointsFromMultiSweeps,
-    NormalizePointsColor,
     PointSegClassMapping,
 )
 from .test_time_aug import MultiScaleFlipAug3D
@@ -30,7 +29,8 @@ from .loading_point_augmentation import AugmentPrevPointsWithImageFeatures
 from .loading_custom import LoadPrevPointsFromFile
 
 from .loading_custom import AccumulatePointClouds
-from .loading_img_features import ExtractFrontImageToKittiFormat, RGBA2RGB
+from .loading_img_features import ExtractFrontImageToKittiFormat, RGBA2RGB, NormalizeMultiSweepImages
+from .loading_depth_map import PointsToDepthMap
 
 __all__ = [
     "ObjectSample",
@@ -47,7 +47,6 @@ __all__ = [
     "DefaultFormatBundle",
     "DefaultFormatBundle3D",
     "DataBaseSampler",
-    "NormalizePointsColor",
     "LoadAnnotations3D",
     "IndoorPointSample",
     "PointSegClassMapping",
@@ -61,5 +60,7 @@ __all__ = [
     "LoadPrevMultiViewImagesFromFile",
     "AccumulatePointClouds",
     "ExtractFrontImageToKittiFormat",
-    "RGBA2RGB"
+    "RGBA2RGB",
+    "PointsToDepthMap",
+    "NormalizeMultiSweepImages",
 ]

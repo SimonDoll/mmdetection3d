@@ -49,7 +49,39 @@ class RGBA2RGB:
         norm_cfg['mean'] = norm_cfg['mean'][0:3]
         norm_cfg['std'] = norm_cfg['mean'][0:3]
         results['img_norm_cfg'] = norm_cfg
-        
+
+        return results
+
+
+@PIPELINES.register_module()
+class NormalizeMultiSweepImages:
+    """Normalizes multiple images"""
+
+    def __init__(self, mean, std, to_rgb=True) -> None:
+
+        self._mean = np.array(mean, dtype=np.float32)
+        self._std = np.array(std, dtype=np.float32)
+
+        # multi view images have the shape
+        # H x W x 3 x imgs
+        # adapt mean and std
+        self._mean = np.expand_dims(self._mean, axis=(0, 1, -1))
+        self._std = np.expand_dims(self._std, axis=(0, 1, -1))
+
+        self._to_rgb = to_rgb
+
+    def __call__(self, results):
+        # the images are H x W x 3 x images amount
+        imgs = results['img']
+
+        if self._to_rgb:
+            # TODO maybe create ascontiguousarray
+            imgs = imgs[..., ::-1, :]
+
+        imgs = np.divide((imgs - self._mean), self._std)
+
+        results['img_norm_cfg'] = dict(
+            mean=self._mean, std=self._std, to_rgb=self._to_rgb)
         return results
 
 
