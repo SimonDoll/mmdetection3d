@@ -11,23 +11,26 @@ from mmdet3d.core.points import BasePoints, get_points_type
 
 @PIPELINES.register_module()
 class PointsToDepthMap:
-    """Converts a pointcloud to a depth map for a given camera"""
+    """Converts a pointcloud to depth maps for all used cameras"""
 
     def __init__(
         self,
-        camera="cam_front",
-        filter_close=1.0,
+        filter_close=0.5,
     ):
         """
+
         Args:
             filter_non_matched(bool) wether to remove points that do not lie in the images. Defaults to True
         """
-        self._camera = camera
+
         if filter_close:
             assert filter_close > 0.0
         self._filter_close = filter_close
 
     def __call__(self, results):
+        """Added  keys: depth_maps
+        The generated depth maps follow the same order / shape as the camera rgb images.
+        """
 
         points = results["points"].tensor
         device = points.device
@@ -39,10 +42,12 @@ class PointsToDepthMap:
             .float()
         )
 
-        print("result =", results.keys())
-
         # h x w x channels x cameras
         imgs = results["img"]
+
+        # imgs x h x w x 1
+        depth_maps = torch.empty(
+            (imgs.shape[3], imgs.shape[1], imgs.shape[0], 1,))
 
         # TODO do in torch
         # move the img dimension to front
@@ -59,14 +64,6 @@ class PointsToDepthMap:
 
         # bring the points to homogenous coords
         points = torch.cat((points, torch.ones((len(points), 1))), dim=1)
-
-        # marks points that have a valid color value
-        colored_points_mask = torch.zeros((len(points),), dtype=torch.bool)
-
-        # create the result array to store the colored points in
-        # n x color channels
-        points_colors = torch.zeros(
-            (len(points), imgs.shape[-1]), dtype=imgs.dtype)
 
         for img_idx in range(len(lidar2imgs)):
             img_mat = lidar2imgs[img_idx]
@@ -112,9 +109,6 @@ class PointsToDepthMap:
 
             # use only the points inside the image
             projected_points = projected_points[valid_points_mask]
-            # get x y as pixel indices
-            img_row_idxs = projected_points[:, 0].long()
-            img_col_idxs = projected_points[:, 1].long()
 
             # set the depth for all unset pixels to 0.0 (convention from sparse2dense)
             # w x h
@@ -122,44 +116,17 @@ class PointsToDepthMap:
             depth_map[projected_points[:, 0].long(
             ), projected_points[:, 1].long()] = projected_points[:, 2]
 
-            # create an rgbd image
+            # add channel dimsion to depth map
+            depth_map = torch.unsqueeze(depth_map, dim=-1)
 
-            self._debug_visualize(
-                img,
-                projected_points[:, 0].long(),
-                projected_points[:, 1].long(),
-                projected_points[:, 2],
-                img_idx,
-            )
+            depth_maps[img_idx] = depth_map
 
-            import dataset_3d.utils.visualization_utils as visualization_utils
-            # depth_map_vis = visualization_utils.depth_to_img(
-            #     depth_map.numpy()) / 255.0
+        # transform depth maps to be represented similar to the camera images
+        # H x W x 1 x imgs amount
+        depth_maps = depth_maps.permute(2, 1, 3, 0)
 
-            plt.imshow(depth_map)
-            plt.savefig("/workspace/work_dirs/plot/lidar_depth_" +
-                        str(img_idx) + ".png")
-            plt.clf()
-            raise ValueError("bla")
+        results['depth_maps'] = depth_maps
 
-            projected_points_colors = img[img_row_idxs, img_col_idxs]
-
-            # TODO how to handle overlapping images?
-            points_colors[valid_points_mask] = projected_points_colors
-            colored_points_mask[valid_points_mask] = True
-
-        # augment the points with the colors
-        valid_point_colors = points_colors[colored_points_mask]
-        valid_points = results["points"].tensor[colored_points_mask]
-        valid_points = valid_points[:, self._use_dim]
-
-        points = torch.cat((valid_points, valid_point_colors), dim=1)
-        points_class = get_points_type(self._coord_type)
-        # TODO attributes
-        points = points_class(
-            points, points_dim=points.shape[-1], attribute_dims=None)
-        # print("new dim =", points.points_dim)
-        results["points"] = points
         return results
 
     def _debug_visualize(self, img, xs, ys, zs, idx):
