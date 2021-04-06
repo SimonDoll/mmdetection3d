@@ -128,7 +128,6 @@ class AugmentPointsWithImageFeatures:
             img_row_idxs = projected_points[:, 0].long()
             img_col_idxs = projected_points[:, 1].long()
 
-            # print("here")
             self._debug_visualize(
                 img,
                 projected_points[:, 0].long(),
