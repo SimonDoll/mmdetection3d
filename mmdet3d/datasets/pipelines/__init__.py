@@ -30,7 +30,7 @@ from .loading_custom import LoadPrevPointsFromFile
 
 from .loading_custom import AccumulatePointClouds
 from .loading_img_features import ExtractFrontImageToKittiFormat, RGBA2RGB, NormalizeMultiSweepImages
-from .loading_depth_map import PointsToDepthMap, DepthMapToPoints
+from .loading_depth_map import PointsToDepthMap, DepthMapToPoints, SparseToDense
 
 __all__ = [
     "ObjectSample",
@@ -63,5 +63,6 @@ __all__ = [
     "RGBA2RGB",
     "PointsToDepthMap",
     "NormalizeMultiSweepImages",
-    "DepthMapToPoints"
+    "DepthMapToPoints",
+    "SparseToDense"
 ]

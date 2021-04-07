@@ -8,6 +8,9 @@ import mmcv
 from mmdet.datasets import PIPELINES
 from mmdet3d.core.points import BasePoints, get_points_type
 
+import sparse_to_dense.models
+import sparse_to_dense.dataloaders.transforms as transforms
+
 
 @PIPELINES.register_module()
 class PointsToDepthMap:
@@ -226,4 +229,83 @@ class DepthMapToPoints:
 
         results['points'] = points
 
+        return results
+
+
+@PIPELINES.register_module()
+class SparseToDense:
+    """Upsamples the point cloud utilizing the sparse to dense approach.
+    """
+
+    def __init__(self, checkpoint_path, road_crop=(150, 0, 750, 1600)):
+        """Module to apply sparse to dense for point cloud upsampling
+
+        Args:
+            checkpoint_path (str): Path to sparse to dense model state dict
+            road_crop (tuple, optional): Road crop for images, y0, x0, height, width. Defaults to (150,0,750,1600).
+        """
+        # h x w
+        self._output_size = (road_crop[2], road_crop[3])
+        self._road_crop = road_crop
+
+        state_dict = torch.load(checkpoint_path)
+        self._model = self._build_model(state_dict)
+
+    def _build_model(self, state_dict, in_channels=4, layers=50, decoder="deconv3",):
+        model = sparse_to_dense.models.ResNet(
+            layers=layers, decoder=decoder, output_size=self._output_size, in_channels=in_channels)
+
+        model.load_state_dict(state_dict)
+        model.eval()
+        return model
+
+    def __call__(self, results):
+
+        # augment depth for all camera images
+
+        print("keys =", results.keys())
+        assert len(results['depth_maps']) == len(results['img'])
+
+        # shape H x W x channels x cameras
+        # change to
+        # cameras x H x W x channels
+        imgs = torch.from_numpy(results["img"])
+        imgs = imgs.permute(3, 0, 1, 2)
+
+        depth_maps = results["depth_maps"]
+        depth_maps = depth_maps.permute(3, 0, 1, 2)
+
+        upsampled_depth_maps = []
+        for cam_idx in range(len(imgs)):
+
+            img = imgs[cam_idx]
+            depth_map = depth_maps[cam_idx]
+            # apply roi cropping (to avoid depth estimation on sky areas)
+
+            y0 = self._road_crop[0]
+            x0 = self._road_crop[1]
+
+            y1 = y0 + self._road_crop[2]
+            x1 = x0 + self._road_crop[3]
+
+            # road crop
+            img = img[y0:y1, x0:x1]
+            depth_map = depth_map[y0:y1, x0:x1]
+
+            # color [0,1] as rgb
+            img = img[:, :, [2, 1, 0]]
+            img = torch.div(img, 255.0)
+
+            # combine to HxWx4 and add batch dimension
+            rgbd = torch.cat((img, depth_map), dim=-1).unsqueeze(dim=0)
+            # reshape to 1x4xHxW
+            rgbd = rgbd.permute(0, 3, 1, 2)
+            upsampled_depth_map = self._model(rgbd)
+
+            # reshape to default img format (h x w x 1) (drop batch dimension)
+            upsampled_depth_map = upsampled_depth_map[0].detach().permute(
+                1, 2, 0)
+            upsampled_depth_maps.append(upsampled_depth_map)
+
+        upsampled_depth_maps = torch.stack(upsampled_depth_maps, dim=-1)
         return results
