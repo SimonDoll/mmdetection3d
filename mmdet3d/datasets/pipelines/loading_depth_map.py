@@ -262,8 +262,6 @@ class SparseToDense:
     def __call__(self, results):
 
         # augment depth for all camera images
-
-        print("keys =", results.keys())
         assert len(results['depth_maps']) == len(results['img'])
 
         # shape H x W x channels x cameras
