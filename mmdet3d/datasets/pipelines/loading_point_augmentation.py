@@ -181,7 +181,7 @@ class AugmentPrevPointsWithImageFeatures:
         filter_non_matched=True,
         coord_type="LIDAR",
         max_sweeps=10,
-        filter_close=1.0,
+        filter_close=0.5,
         use_dim=[0, 1, 2, 3],
     ):
         """
