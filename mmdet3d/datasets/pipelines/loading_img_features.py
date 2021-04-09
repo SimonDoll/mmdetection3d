@@ -22,7 +22,7 @@ class RGBA2RGB:
         # imgs are loaded
         # h  x w x channels x cameras
         # -> channels [0:3] are rgb
-        results['img'] = results['img'][:, :, 0:3, :]
+        results['img'] = [img[:, :, 0:3] for img in results['img']]
         # tuple to list
         img_shape = list(results['img_shape'])
         img_shape[2] = 3  # 3 channels only
@@ -98,7 +98,7 @@ class ExtractFrontImageToKittiFormat:
 
         # TODO critical this module is for debugging only!!!
         # for the moment simply extract the first image in the list (as it is the center for testing)
-        results['img'] = results['img'][:, :, :, 0]
+        results['img'] = results['img'][0]
         results['img_shape'] = results['img_shape'][0:3]
         results['ori_shape'] = results['img_shape']
         results['pad_shape'] = results['img_shape']

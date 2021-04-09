@@ -41,19 +41,18 @@ class LoadMultiViewImageFromFiles(object):
                 - img_norm_cfg (dict): Normalization configuration of images.
         """
         filename = results["img_filename"]
-        img = np.stack(
-            [mmcv.imread(name, self.color_type) for name in filename], axis=-1
-        )
+        imgs = [mmcv.imread(name, self.color_type) for name in filename]
         if self.to_float32:
-            img = img.astype(np.float32)
+            imgs = [img.astype(np.float32) for img in imgs]
         results["filename"] = filename
-        results["img"] = img
-        results["img_shape"] = img.shape
-        results["ori_shape"] = img.shape
+        results["img"] = imgs
+        # assuming that all images have the same shape
+        results["img_shape"] = imgs[0].shape
+        results["ori_shape"] = imgs[0].shape
         # Set initial values for default meta_keys
-        results["pad_shape"] = img.shape
+        results["pad_shape"] = imgs[0].shape
         results["scale_factor"] = 1.0
-        num_channels = 1 if len(img.shape) < 3 else img.shape[2]
+        num_channels = 1 if len(imgs[0].shape) < 3 else imgs[0].shape[2]
         results["img_norm_cfg"] = dict(
             mean=np.zeros(num_channels, dtype=np.float32),
             std=np.ones(num_channels, dtype=np.float32),
