@@ -75,10 +75,6 @@ class AugmentPointsWithImageFeatures:
         points_colors = torch.zeros(
             (len(points), imgs.shape[-1]), dtype=imgs.dtype)
 
-        # make points a row vector n x 4 x 1
-        # (enables us to use batch matrix multiplication)
-        # points = torch.unsqueeze(points, dim=2)
-
         for img_idx in range(len(lidar2imgs)):
             img_mat = lidar2imgs[img_idx]
             img = imgs[img_idx]
@@ -128,17 +124,18 @@ class AugmentPointsWithImageFeatures:
             img_row_idxs = projected_points[:, 0].long()
             img_col_idxs = projected_points[:, 1].long()
 
-            self._debug_visualize(
-                img,
-                projected_points[:, 0].long(),
-                projected_points[:, 1].long(),
-                projected_points[:, 2],
-                img_idx,
-            )
+            # self._debug_visualize(
+            #     img,
+            #     projected_points[:, 0].long(),
+            #     projected_points[:, 1].long(),
+            #     projected_points[:, 2],
+            #     img_idx,
+            # )
 
             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
             # TODO how to handle overlapping images?
+            # atm we override with the last camera image in case of conflict
             points_colors[valid_points_mask] = projected_points_colors
             colored_points_mask[valid_points_mask] = True
 
