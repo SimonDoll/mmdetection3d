@@ -158,11 +158,8 @@ class DepthMapToPoints:
             .float()
         )
 
-        # h x w x 1 x cameras
+        # list cameras [h x w x 1]
         depth_maps = results["depth_maps"]
-
-        # cams x w x h x 1
-        depth_maps = depth_maps.permute(3, 1, 0, 2)
 
         points = []
         for img_idx in range(len(img_T_lidar_tfs)):
@@ -207,9 +204,10 @@ class DepthMapToPoints:
             points_lidar = points_img_plane @ lidar_T_img.T
             points_lidar *= torch.unsqueeze(valid_depth_values, dim=-1)
 
+            # TODO how to hanle overlapping images?
             points.append(points_lidar[:, 0:3])
 
-        points = torch.cat(points, dim=-1)
+        points = torch.cat(points, dim=0)
 
         points_class = get_points_type(self._coord_type)
         points = points_class(

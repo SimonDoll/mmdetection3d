@@ -281,13 +281,13 @@ class AugmentPrevPointsWithImageFeatures:
             img_row_idxs = projected_points[:, 0].long()
             img_col_idxs = projected_points[:, 1].long()
 
-            self._debug_visualize(
-                img,
-                projected_points[:, 0].long(),
-                projected_points[:, 1].long(),
-                projected_points[:, 2],
-                img_idx,
-            )
+            # self._debug_visualize(
+            #     img,
+            #     projected_points[:, 0].long(),
+            #     projected_points[:, 1].long(),
+            #     projected_points[:, 2],
+            #     img_idx,
+            # )
 
             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
