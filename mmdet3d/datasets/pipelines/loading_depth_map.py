@@ -45,22 +45,11 @@ class PointsToDepthMap:
             .float()
         )
 
-        # h x w x channels x cameras
+        # list cameras [h x w x channels]
         imgs = results["img"]
 
-        # imgs x h x w x 1
-        depth_maps = torch.empty(
-            (imgs.shape[3], imgs.shape[1], imgs.shape[0], 1,))
-
-        # TODO do in torch
-        # move the img dimension to front
-        imgs = np.moveaxis(imgs, -1, 0)
-
-        # swap width and height
-        imgs = np.swapaxes(imgs, 1, 2)
-
-        # cameras x w x h x color channels
-        imgs = torch.from_numpy(imgs).to(device)
+        # will be list(cameras [h x w x 1]
+        depth_maps = []
 
         # get x y z only
         points = points[:, 0:3]
@@ -71,6 +60,9 @@ class PointsToDepthMap:
         for img_idx in range(len(lidar2imgs)):
             img_mat = lidar2imgs[img_idx]
             img = imgs[img_idx]
+
+            # h x w
+            depth_map = torch.zeros(imgs[img_idx].shape[0:2])
 
             # transform all points on the img plane of the currently selected img
 
@@ -94,11 +86,11 @@ class PointsToDepthMap:
             # valid means that the points lie inside the image x y borders, z is not filtered here
             mask_x = torch.logical_and(
                 projected_points[:,
-                                 0] > 0, projected_points[:, 0] < img.shape[0]
+                                 0] > 0, projected_points[:, 0] < depth_map.shape[1]
             )
             mask_y = torch.logical_and(
                 projected_points[:,
-                                 1] > 0, projected_points[:, 1] < img.shape[1]
+                                 1] > 0, projected_points[:, 1] < depth_map.shape[0]
             )
 
             if self._filter_close:
@@ -113,20 +105,16 @@ class PointsToDepthMap:
             # use only the points inside the image
             projected_points = projected_points[valid_points_mask]
 
-            # set the depth for all unset pixels to 0.0 (convention from sparse2dense)
-            # w x h
-            depth_map = torch.zeros(img.shape[0:2])
-            depth_map[projected_points[:, 0].long(
-            ), projected_points[:, 1].long()] = projected_points[:, 2]
+            # keep the depth for all unset pixels at 0.0 (convention from sparse2dense)
+
+            # h x w
+            depth_map[projected_points[:, 1].long(
+            ), projected_points[:, 0].long()] = projected_points[:, 2]
 
             # add channel dimsion to depth map
             depth_map = torch.unsqueeze(depth_map, dim=-1)
 
-            depth_maps[img_idx] = depth_map
-
-        # transform depth maps to be represented similar to the camera images
-        # H x W x 1 x imgs amount
-        depth_maps = depth_maps.permute(2, 1, 3, 0)
+            depth_maps.append(depth_map)
 
         results['depth_maps'] = depth_maps
 

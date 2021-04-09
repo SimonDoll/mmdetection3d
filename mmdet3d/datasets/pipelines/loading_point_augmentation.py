@@ -68,11 +68,7 @@ class AugmentPointsWithImageFeatures:
             img_mat = lidar2imgs[img_idx]
             img = imgs[img_idx]
 
-            # swap width and height
-            # img = w x h x channels
-            img = np.swapaxes(img, 0, 1)
-
-            # cameras x w x h x color channels
+            # cameras x h x w x color channels
             img = torch.from_numpy(img).to(device)
 
             # transform all points on the img plane of the currently selected img
@@ -96,11 +92,11 @@ class AugmentPointsWithImageFeatures:
             # valid means that the points lie inside the image x y borders, z is not filtered here
             mask_x = torch.logical_and(
                 projected_points[:,
-                                 0] > 0, projected_points[:, 0] < img.shape[0]
+                                 0] > 0, projected_points[:, 0] < img.shape[1]
             )
             mask_y = torch.logical_and(
                 projected_points[:,
-                                 1] > 0, projected_points[:, 1] < img.shape[1]
+                                 1] > 0, projected_points[:, 1] < img.shape[0]
             )
 
             if self._filter_close:
@@ -116,16 +112,16 @@ class AugmentPointsWithImageFeatures:
             # use only the points inside the image
             projected_points = projected_points[valid_points_mask]
             # get x y as pixel indices
-            img_row_idxs = projected_points[:, 0].long()
-            img_col_idxs = projected_points[:, 1].long()
+            img_row_idxs = projected_points[:, 1].long()
+            img_col_idxs = projected_points[:, 0].long()
 
-            self._debug_visualize(
-                img,
-                projected_points[:, 0].long(),
-                projected_points[:, 1].long(),
-                projected_points[:, 2],
-                img_idx,
-            )
+            # self._debug_visualize(
+            #     img,
+            #     projected_points[:, 0].long(),
+            #     projected_points[:, 1].long(),
+            #     projected_points[:, 2],
+            #     img_idx,
+            # )
 
             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
@@ -154,7 +150,6 @@ class AugmentPointsWithImageFeatures:
         zs = zs.cpu().detach().numpy()
 
         img = img.cpu().detach().numpy()
-        img = np.swapaxes(img, 0, 1)
 
         plt.imshow(img, zorder=1)
         plt.scatter(xs, ys, zorder=2, s=0.4, c=zs)
