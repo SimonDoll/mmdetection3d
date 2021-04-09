@@ -114,7 +114,7 @@ class PointsToDepthMap:
             # add channel dimsion to depth map
             depth_map = torch.unsqueeze(depth_map, dim=-1)
 
-            depth_maps.append(depth_map)
+            depth_maps.append(depth_map.numpy())
 
         results['depth_maps'] = depth_maps
 
@@ -173,14 +173,16 @@ class DepthMapToPoints:
             # get the valid pixel coordinates
             # all pixels with depth != 0 are valid
 
+            depth_map = torch.from_numpy(depth_map)
+
             valid_idxs = torch.nonzero(depth_map)
 
             points_img_plane = torch.ones((len(valid_idxs), 3))
 
-            valid_x_idxs = valid_idxs[:, 0]
-            valid_y_idxs = valid_idxs[:, 1]
+            valid_y_idxs = valid_idxs[:, 0]
+            valid_x_idxs = valid_idxs[:, 1]
 
-            valid_depth_values = depth_map[valid_x_idxs, valid_y_idxs]
+            valid_depth_values = depth_map[valid_y_idxs, valid_x_idxs]
 
             # create the points for back projection
             points_img_plane = torch.ones((len(valid_depth_values), 4))
@@ -250,15 +252,8 @@ class SparseToDense:
         # augment depth for all camera images
         assert len(results['depth_maps']) == len(results['img'])
 
-        # shape H x W x channels x cameras
-        # change to
-        # cameras x H x W x channels
-        imgs = torch.from_numpy(results["img"])
-        imgs = imgs.permute(3, 0, 1, 2)
-
         depth_maps = results["depth_maps"]
-        depth_maps = depth_maps.permute(3, 0, 1, 2)
-
+        imgs = results["img"]
         upsampled_depth_maps = []
         for cam_idx in range(len(imgs)):
 
@@ -278,7 +273,10 @@ class SparseToDense:
 
             # color [0,1] as rgb
             img = img[:, :, [2, 1, 0]]
-            img = torch.div(img, 255.0)
+            img = np.divide(img, 255.0)
+
+            img = torch.from_numpy(img).float()
+            depth_map = torch.from_numpy(depth_map).float()
 
             # combine to HxWx4 and add batch dimension
             rgbd = torch.cat((img, depth_map), dim=-1).unsqueeze(dim=0)
@@ -289,7 +287,8 @@ class SparseToDense:
             # reshape to default img format (h x w x 1) (drop batch dimension)
             upsampled_depth_map = upsampled_depth_map[0].detach().permute(
                 1, 2, 0)
-            upsampled_depth_maps.append(upsampled_depth_map)
+            upsampled_depth_maps.append(upsampled_depth_map.numpy())
 
-        upsampled_depth_maps = torch.stack(upsampled_depth_maps, dim=-1)
+        results["depth_maps"] = upsampled_depth_maps
+
         return results
