@@ -47,40 +47,35 @@ class AugmentPointsWithImageFeatures:
             .to(device)
             .float()
         )
-
-        # h x w x channels x cameras
-        imgs = results["img"]
-
-        # TODO do in torch
-        # move the img dimension to front
-        imgs = np.moveaxis(imgs, -1, 0)
-
-        # swap width and height
-        imgs = np.swapaxes(imgs, 1, 2)
-
-        # cameras x w x h x color channels
-        imgs = torch.from_numpy(imgs).to(device)
-
         # get x y z only
         points = points[:, 0:3]
 
         # bring the points to homogenous coords
         points = torch.cat((points, torch.ones((len(points), 1))), dim=1)
 
-        # marks points that have a valid color value
-        colored_points_mask = torch.zeros((len(points),), dtype=torch.bool)
+        # list cameras[h x w x channels]
+        imgs = results["img"]
 
         # create the result array to store the colored points in
         # n x color channels
-        points_colors = torch.zeros(
-            (len(points), imgs.shape[-1]), dtype=imgs.dtype)
+        colors_shape = (len(points), imgs[0].shape[-1])
+        points_colors = torch.zeros(colors_shape)
+
+        # marks points that have a valid color value
+        colored_points_mask = torch.zeros((len(points),), dtype=torch.bool)
 
         for img_idx in range(len(lidar2imgs)):
             img_mat = lidar2imgs[img_idx]
             img = imgs[img_idx]
 
-            # transform all points on the img plane of the currently selected img
+            # swap width and height
+            # img = w x h x channels
+            img = np.swapaxes(img, 0, 1)
 
+            # cameras x w x h x color channels
+            img = torch.from_numpy(img).to(device)
+
+            # transform all points on the img plane of the currently selected img
             # use the theorem:
             # if points would have been 4 x 1 (single point)
             # (Img_mat . Points)^T = Points^T . Img_mat^T
@@ -124,19 +119,19 @@ class AugmentPointsWithImageFeatures:
             img_row_idxs = projected_points[:, 0].long()
             img_col_idxs = projected_points[:, 1].long()
 
-            # self._debug_visualize(
-            #     img,
-            #     projected_points[:, 0].long(),
-            #     projected_points[:, 1].long(),
-            #     projected_points[:, 2],
-            #     img_idx,
-            # )
+            self._debug_visualize(
+                img,
+                projected_points[:, 0].long(),
+                projected_points[:, 1].long(),
+                projected_points[:, 2],
+                img_idx,
+            )
 
             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
             # TODO how to handle overlapping images?
             # atm we override with the last camera image in case of conflict
-            points_colors[valid_points_mask] = projected_points_colors
+            points_colors[valid_points_mask] = projected_points_colors.float()
             colored_points_mask[valid_points_mask] = True
 
         # augment the points with the colors
@@ -222,40 +217,32 @@ class AugmentPrevPointsWithImageFeatures:
             .float()
         )
 
-        # TODO do in torch
-        # move the img dimension to front
-        imgs = np.moveaxis(imgs, -1, 0)
-
-        # swap width and height
-        imgs = np.swapaxes(imgs, 1, 2)
-
-        # cameras x w x h x color channels
-        imgs = torch.from_numpy(imgs).to(device)
-
         # get x y z only
         points = points[:, 0:3]
 
         # bring the points to homogenous coords
         points = torch.cat((points, torch.ones((len(points), 1))), dim=1)
 
-        # marks points that have a valid color value
-        colored_points_mask = torch.zeros((len(points),), dtype=torch.bool)
-
         # create the result array to store the colored points in
         # n x color channels
-        points_colors = torch.zeros(
-            (len(points), imgs.shape[-1]), dtype=imgs.dtype)
+        colors_shape = (len(points), imgs[0].shape[-1])
+        points_colors = torch.zeros(colors_shape)
 
-        # make points a row vector n x 4 x 1
-        # (enables us to use batch matrix multiplication)
-        # points = torch.unsqueeze(points, dim=2)
+        # marks points that have a valid color value
+        colored_points_mask = torch.zeros((len(points),), dtype=torch.bool)
 
         for img_idx in range(len(lidar2imgs)):
             img_mat = lidar2imgs[img_idx]
             img = imgs[img_idx]
 
-            # transform all points on the img plane of the currently selected img
+            # swap width and height
+            # img = w x h x channels
+            img = np.swapaxes(img, 0, 1)
 
+            # cameras x w x h x color channels
+            img = torch.from_numpy(img).to(device)
+
+            # transform all points on the img plane of the currently selected img
             # use the theorem:
             # if points would have been 4 x 1 (single point)
             # (Img_mat . Points)^T = Points^T . Img_mat^T
@@ -285,6 +272,7 @@ class AugmentPrevPointsWithImageFeatures:
 
             if self._filter_close:
                 valid_points_mask = torch.logical_and(mask_x, mask_y)
+
                 mask_z = projected_points[:, 2] > self._filter_close
                 valid_points_mask = torch.logical_and(
                     valid_points_mask, mask_z)
@@ -298,18 +286,19 @@ class AugmentPrevPointsWithImageFeatures:
             img_row_idxs = projected_points[:, 0].long()
             img_col_idxs = projected_points[:, 1].long()
 
-            # self._debug_visualize(
-            #     img,
-            #     projected_points[:, 0].long(),
-            #     projected_points[:, 1].long(),
-            #     projected_points[:, 2],
-            #     img_idx,
-            # )
+            self._debug_visualize(
+                img,
+                projected_points[:, 0].long(),
+                projected_points[:, 1].long(),
+                projected_points[:, 2],
+                img_idx,
+            )
 
             projected_points_colors = img[img_row_idxs, img_col_idxs]
 
             # TODO how to handle overlapping images?
-            points_colors[valid_points_mask] = projected_points_colors
+            # atm we override with the last camera image in case of conflict
+            points_colors[valid_points_mask] = projected_points_colors.float()
             colored_points_mask[valid_points_mask] = True
 
         # augment the points with the colors
