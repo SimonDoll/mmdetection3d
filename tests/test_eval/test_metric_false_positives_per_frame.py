@@ -13,17 +13,20 @@ class TestMetricFalsePositivesPerFrame:
                 {
                     'similarity_score': 0.9,
                     'gt_box': True,
-                    'pred_score': 0.5
+                    'pred_score': 0.5,
+                    'data_id': 0
                 },
                 {
                     'similarity_score': 1,
                     'gt_box': True,
-                    'pred_score': 0.7
+                    'pred_score': 0.7,
+                    'data_id': 0
                 },
                 {
                     'similarity_score': 0.7,
                     'gt_box': True,
-                    'pred_score': 0.1
+                    'pred_score': 0.1,
+                    'data_id': 0
                 },
             ]
         }
@@ -53,17 +56,20 @@ class TestMetricFalsePositivesPerFrame:
                 {
                     'similarity_score': 0.9,
                     'gt_box': None,
-                    'pred_score': 0.5
+                    'pred_score': 0.5,
+                    'data_id': 0
                 },
                 {
                     'similarity_score': 1,
                     'gt_box': None,
-                    'pred_score': 0.7
+                    'pred_score': 0.7,
+                    'data_id': 1
                 },
                 {
                     'similarity_score': 0.7,
                     'gt_box': None,
-                    'pred_score': 0.1
+                    'pred_score': 0.1,
+                    'data_id': 2
                 },
             ]
         }
@@ -80,17 +86,20 @@ class TestMetricFalsePositivesPerFrame:
                 {
                     'similarity_score': 0.9,
                     'gt_box': True,
-                    'pred_score': 0.5
+                    'pred_score': 0.5,
+                    'data_id': 1
                 },
                 {
                     'similarity_score': 1,
                     'gt_box': None,
-                    'pred_score': 0.7
+                    'pred_score': 0.7,
+                    'data_id': 2
                 },
                 {
                     'similarity_score': 0.7,
                     'gt_box': None,
-                    'pred_score': 0.1
+                    'pred_score': 0.1,
+                    'data_id': 3
                 },
             ]
         }
@@ -107,17 +116,20 @@ class TestMetricFalsePositivesPerFrame:
                 {
                     'similarity_score': 0.9,
                     'gt_box': True,
-                    'pred_score': 0.5
+                    'pred_score': 0.5,
+                    'data_id': 0
                 },
                 {
                     'similarity_score': 1,
                     'gt_box': True,
-                    'pred_score': 0.7
+                    'pred_score': 0.7,
+                    'data_id': 0
                 },
                 {
                     'similarity_score': 0.7,
                     'gt_box': True,
-                    'pred_score': 0.1
+                    'pred_score': 0.1,
+                    'data_id': 0
                 },
             ]
         }
@@ -134,17 +146,20 @@ class TestMetricFalsePositivesPerFrame:
                 {
                     'similarity_score': 0.9,
                     'gt_box': True,
-                    'pred_score': 0.5
+                    'pred_score': 0.5,
+                    'data_id': 0
                 },
                 {
                     'similarity_score': 1,
                     'gt_box': None,
-                    'pred_score': 0.7
+                    'pred_score': 0.7,
+                    'data_id': 0
                 },
                 {
                     'similarity_score': 0.7,
                     'gt_box': None,
-                    'pred_score': 0.1
+                    'pred_score': 0.1,
+                    'data_id': 0
                 },
             ]
         }
