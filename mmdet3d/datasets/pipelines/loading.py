@@ -51,13 +51,15 @@ class LoadMultiViewImageFromFiles(object):
         results["ori_shape"] = imgs[0].shape
         # Set initial values for default meta_keys
         results["pad_shape"] = imgs[0].shape
-        results["scale_factor"] = 1.0
+        results["scale_factor"] = np.ones((len(imgs[0].shape),))
         num_channels = 1 if len(imgs[0].shape) < 3 else imgs[0].shape[2]
         results["img_norm_cfg"] = dict(
             mean=np.zeros(num_channels, dtype=np.float32),
             std=np.ones(num_channels, dtype=np.float32),
             to_rgb=False,
         )
+
+        results['lidar2img'] = results['img_T_lidar']
         return results
 
     def __repr__(self):

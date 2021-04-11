@@ -53,7 +53,7 @@ def create_carla_infos(
 
     lidar_name = "lidar_top"
     ego_pose_sensor_name = "imu_perfect"
-    camera_names = ["cam_front"]
+    camera_names = ["cam_front", "cam_front_left", "cam_front_right"]
     # train set
     train_set = root_path.joinpath(train_set_folder_name)
     train_infos, train_meta = _run_for_set(
