@@ -123,13 +123,13 @@ class TestMetricFalsePositivesPerFrame:
                     'similarity_score': 1,
                     'gt_box': True,
                     'pred_score': 0.7,
-                    'data_id': 0
+                    'data_id': 1
                 },
                 {
                     'similarity_score': 0.7,
                     'gt_box': True,
                     'pred_score': 0.1,
-                    'data_id': 0
+                    'data_id': 2
                 },
             ]
         }

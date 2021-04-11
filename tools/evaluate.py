@@ -137,6 +137,10 @@ class EvalPipeline:
         result_paths = []
         for i, data in enumerate(self.data_loader):
 
+            # TODO critical remove
+            if i > 10:
+                break
+
             with torch.no_grad():
                 annos = dataset.get_ann_info(i)
 

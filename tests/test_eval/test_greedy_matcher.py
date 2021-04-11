@@ -6,7 +6,7 @@ from mmdet3d.core.evaluation.evaluation_3d.matchers import *
 from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import *
 
 
-class TestMatchers:
+class TestGreedyMatcher:
     CLASSES = [1, 2]
 
     def create_gt_boxes(self):
@@ -47,7 +47,7 @@ class TestMatchers:
         pred_boxes = LiDARInstance3DBoxes(pred_boxes)
         return pred_boxes, pred_labels, pred_scores
 
-    def test_greedy_matcher_with_boxes(self, ):
+    def test_matcher_with_boxes(self, ):
 
         gt_boxes, gt_labels = self.create_gt_boxes()
         pred_boxes, pred_labels, pred_scores = self.create_pred_boxes()
@@ -101,7 +101,7 @@ class TestMatchers:
         assert torch.allclose(match['gt_box'].tensor, gt_boxes[1].tensor)
         assert np.isclose(match['similarity_score'], 0.0)
 
-    def test_greedy_matcher_without_boxes(self):
+    def test_matcher_without_boxes(self):
         similarity_measure = Iou()
         matcher = GreedyMatcher(self.CLASSES)
 
@@ -132,7 +132,7 @@ class TestMatchers:
         # in the empty case a dict of classes -> empty list should be returned
         assert matching_results == {self.CLASSES[0]: [], self.CLASSES[1]: []}
 
-    def test_greedy_matcher_with_pred_boxes_only(self):
+    def test_matcher_with_pred_boxes_only(self):
         similarity_measure = Iou()
         matcher = GreedyMatcher(self.CLASSES)
 
