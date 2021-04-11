@@ -33,7 +33,7 @@ from tools.fuse_conv_bn import fuse_module
 from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import *
 from mmdet3d.core.evaluation.evaluation_3d.filters import *
 from mmdet3d.core.evaluation.evaluation_3d.metrics import *
-from mmdet3d.core.evaluation.evaluation_3d.matchers import GreedyMatcher
+from mmdet3d.core.evaluation.evaluation_3d.matchers import GreedyMatcher, HungarianMatcher
 
 
 class EvalPipeline:
@@ -107,7 +107,7 @@ class EvalPipeline:
         self._reversed_score = False
 
         # we use class ids for matching, cat2id can be used to assign a category name later on
-        self._matcher = GreedyMatcher(self.cat2id.values())
+        self._matcher = HungarianMatcher(self.cat2id.values())
 
         self._similarity_threshold = similarity_threshold
 
@@ -136,10 +136,6 @@ class EvalPipeline:
 
         result_paths = []
         for i, data in enumerate(self.data_loader):
-
-            # TODO critical remove
-            if i > 10:
-                break
 
             with torch.no_grad():
                 annos = dataset.get_ann_info(i)

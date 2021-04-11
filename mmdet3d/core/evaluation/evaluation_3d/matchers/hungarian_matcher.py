@@ -123,10 +123,7 @@ class HungarianMatcher(Matcher):
                 result[c].append(match)
 
             # add the non matched pred boxes
-            print("non matched preds =", non_matched_pred_idxs)
             for unmatched_pred_idx in non_matched_pred_idxs.tolist():
-                print("pred idx =", unmatched_pred_idx,
-                      "type =", type(unmatched_pred_idx))
                 # unmatched box, create empty match
                 match = {
                     'pred_box': pred_boxes_filtered[unmatched_pred_idx],
