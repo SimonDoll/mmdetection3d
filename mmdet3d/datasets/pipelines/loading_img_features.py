@@ -132,9 +132,6 @@ class ExtractFrontImageToKittiFormat:
         results['img_filename'] = results['img_filename'][0]
         results['img_fields'] = ['img']
 
-        # scale factor should not be in keys
-        results.pop('scale_factor')
-
         results['img_T_lidar'] = results['img_T_lidar'][0]
         results['lidar2img'] = results['img_T_lidar']
 
