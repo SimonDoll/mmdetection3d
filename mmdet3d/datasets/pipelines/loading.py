@@ -79,9 +79,9 @@ class LoadMultiViewImageFromFiles(object):
         # the scale computation in mmdetection resize relies on the scale parameter (is extracted from img)
         # this can not be done in the case of multi view imgs
         # we therefore set that scale here to bypass this
-        scale_factor = 1.0
-        results["scale"] = tuple(
-            [int(x * scale_factor) for x in img_shape][::-1])
+        results["scale"] = 1.0
+        # results["scale"] = tuple(
+        #     [int(x * scale_factor) for x in img_shape][::-1])
 
         num_channels = 1 if len(img_shape) < 3 else img_shape[2]
         results["img_norm_cfg"] = dict(
