@@ -284,8 +284,6 @@ class MVXTwoStageDetectorMultiCam(Base3DDetector):
             dict: Losses of different branches.
         """
 
-        print("img = ", img.shape)
-
         img_feats, pts_feats = self.extract_feat(
             points, img=img, img_metas=img_metas)
 
