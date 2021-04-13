@@ -80,9 +80,6 @@ class MultiViewImagesToList:
         return results
 
 
-MultiViewImagesToList
-
-
 @PIPELINES.register_module()
 class NormalizeMultiSweepImages:
     """Normalizes multiple images"""
