@@ -19,10 +19,16 @@ class RGBA2RGB:
         pass
 
     def __call__(self, results):
-        # imgs are loaded
-        # h  x w x channels x cameras
-        # -> channels [0:3] are rgb
-        results['img'] = [img[:, :, 0:3] for img in results['img']]
+
+        for key in results.get('img_fields', ['img']):
+            # imgs are loaded
+            # h x w x channels
+            # -> channels [0:3] are rgb
+
+            img = results[key]
+            img = img[:, :, 0:3]
+
+            results[key] = img
         # tuple to list
         img_shape = list(results['img_shape'])
         img_shape[2] = 3  # 3 channels only
@@ -51,6 +57,30 @@ class RGBA2RGB:
         results['img_norm_cfg'] = norm_cfg
 
         return results
+
+
+@PIPELINES.register_module()
+class MultiViewImagesToList:
+    """Collects multi view images (referenced in img_fields) to a list and adds it to resutls["img"]"""
+
+    def __init__(
+        self,
+    ):
+        pass
+
+    def __call__(self, results):
+
+        imgs = []
+        for cam_name in results.get('img_fields'):
+
+            # the order of images must be the same as the cameras (because the lidar2img transforms are in the same order as well)
+            imgs.append(results[cam_name])
+
+        results["img"] = imgs
+        return results
+
+
+MultiViewImagesToList
 
 
 @PIPELINES.register_module()
@@ -98,7 +128,7 @@ class ExtractFrontImageToKittiFormat:
 
         # TODO critical this module is for debugging only!!!
         # for the moment simply extract the first image in the list (as it is the center for testing)
-        results['img'] = results['img'][0]
+        results['img'] = results[results["camera_names"][0]]
         results['img_shape'] = results['img_shape'][0:3]
         results['ori_shape'] = results['img_shape']
         results['pad_shape'] = results['img_shape']
