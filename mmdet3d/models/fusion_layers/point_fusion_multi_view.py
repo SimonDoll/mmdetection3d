@@ -1,6 +1,7 @@
 import torch
 from mmcv.cnn import ConvModule, xavier_init
 from torch import nn as nn
+from torch._C import dtype
 from torch.nn import functional as F
 
 from ..registry import FUSION_LAYERS
@@ -98,9 +99,9 @@ def point_sample(
     coor_y = coor_y / h * 2 - 1
     coor_x = coor_x / w * 2 - 1
 
-    print("points =", points.shape)
-    print("coors x =", coor_x.shape)
-    print("coors y =", coor_y.shape)
+    # print("points =", points.shape)
+    # print("coors x =", coor_x.shape)
+    # print("coors y =", coor_y.shape)
 
     grid = (
         torch.cat([coor_x, coor_y], dim=1).unsqueeze(0).unsqueeze(0)
@@ -181,6 +182,7 @@ class PointFusionMultiView(nn.Module):
         assert len(img_channels) == len(img_levels)
 
         self.img_levels = img_levels
+        self.out_channels = out_channels
         self.act_cfg = act_cfg
         self.activate_out = activate_out
         self.fuse_out = fuse_out
@@ -227,10 +229,10 @@ class PointFusionMultiView(nn.Module):
                 nn.BatchNorm1d(out_channels, eps=1e-3, momentum=0.01),
                 nn.ReLU(inplace=False),
             )
-
         self.init_weights()
 
     # default init_weights for conv(msra) and norm in ConvModule
+
     def init_weights(self):
         """Initialize the weights of modules."""
         for m in self.modules():
@@ -250,6 +252,7 @@ class PointFusionMultiView(nn.Module):
         Returns:
             torch.Tensor: Fused features of each point.
         """
+
         img_pts = self.obtain_mlvl_feats(img_feats, pts, img_metas)
         img_pre_fuse = self.img_transform(img_pts)
         if self.training and self.dropout_ratio > 0:
@@ -268,49 +271,82 @@ class PointFusionMultiView(nn.Module):
         """Obtain multi-level features for each point.
 
         Args:
-            img_feats (list(torch.Tensor)): Multi-scale image features produced
-                by image backbone in shape (N, C, H, W).
+            img_feats (list(list(torch.Tensor))): Multi-scale image features produced
+                by image backbone in shape (B, C, H, W) for each lvl and each camera.
             pts (list[torch.Tensor]): Points of each sample.
-            img_metas (list[dict]): Meta information for each sample.
+            img_metas (list[dict]): Meta information for each sample in a batch.
 
         Returns:
             torch.Tensor: Corresponding image features of each point.
         """
 
         if self.lateral_convs is not None:
-            img_ins = [
-                lateral_conv(img_feats[i])
-                for i, lateral_conv in zip(self.img_levels, self.lateral_convs)
-            ]
+            img_ins = []
+            for cam_idx in range(len(img_feats)):
+                img_feats_c = img_feats[cam_idx]
+                img_ins_c = [
+                    lateral_conv(img_feats_c[i])
+                    for i, lateral_conv in zip(self.img_levels, self.lateral_convs)
+                ]
+                img_ins.append(img_ins_c)
+            img_pts_features = self.out_channels * len(self.img_levels)
         else:
             img_ins = img_feats
-        print("img_ins =", len(img_ins), "shape =",  img_ins[0].shape)
-        print("before =", img_metas[0].keys())
-        img_feats_per_point = []
+            img_pts_features = 0
+            # compute output_shape ([0] for first cam)
+            for lvl in range(len(self.img_levels)):
+                # features are cams x lvls x feats x h x w
+                # output is sum of feats over levels
+                img_pts_features += img_feats[0][lvl].size(1)
+
         # Sample multi-level features
-        # for all images
-        # TODO what if batch > 1?
-        # img_ins =  levels x cams  x features
-        print("pts =", len(pts))
-        for i in range(img_ins[0].size(0)):
-            mlvl_img_feats = []
-            for level in range(len(self.img_levels)):
-                print("img ins shape loop =", img_ins[level].shape)
-                print("i = ", i)
-                print("img ins shape complicated =",
-                      img_ins[level][i:i+1].shape)
-                mlvl_img_feats.append(
-                    self.sample_single(
-                        img_ins[level][i:i+1], pts[0][:, :3], img_metas[0], i
-                    )
-                )
-            mlvl_img_feats = torch.cat(mlvl_img_feats, dim=-1)
-            img_feats_per_point.append(mlvl_img_feats)
+        img_feats_per_point = []
 
-        img_pts = torch.cat(img_feats_per_point, dim=0)
-        return img_pts
+        for i in range(len(img_metas)):
+            # batch dimension
+            # marks all points that have not been processed yet
+            pts_to_process_mask = torch.ones(
+                len(pts[i]), dtype=torch.bool, device="cuda")
 
-    def sample_single(self, img_feats, pts, img_meta, i):
+            # stores img features for all points (combined for all cameras)
+            img_pts_sample = torch.zeros(
+                len(pts[i]), img_pts_features, device="cuda")
+            for cam_idx in range(len(img_ins)):
+                # for each camera
+                img_pts_multi_lvl = []
+                for lvl in range(len(self.img_levels)):
+                    # feature map level dim
+                    img_feats_lvl_c = img_ins[cam_idx][lvl]
+
+                    img_pts_single_lvl = self.sample_single(
+                        img_feats_lvl_c[i:i+1], pts[i][:, :3], img_metas[i], cam_idx)
+                    img_pts_multi_lvl.append(img_pts_single_lvl)
+
+                # concatenate multi level features
+                img_pts_multi_lvl = torch.cat(img_pts_multi_lvl, dim=-1)
+
+                # img_pts_multi_lvl is points x feats (out of image points get zero padded)
+                # remove all projected points (to prevent duplicate projection)
+
+                # true -> point lies inside the current camera image
+                img_pts_mask = torch.any(img_pts_multi_lvl.bool(), dim=1)
+
+                # remove all points that have been augmented already
+                img_pts_mask = torch.logical_and(
+                    img_pts_mask, pts_to_process_mask)
+
+                # mark points as processed
+                pts_to_process_mask[img_pts_mask] = False
+
+                # store augmented points
+                img_pts_sample[img_pts_mask] = img_pts_multi_lvl[img_pts_mask]
+            img_feats_per_point.append(img_pts_sample)
+
+        # concatenate all clouds -> points for all batches in one dim
+        img_feats_per_point = torch.cat(img_feats_per_point, dim=0)
+        return img_feats_per_point
+
+    def sample_single(self, img_feats, pts, img_meta, cam_idx):
         """Sample features from single level image feature map.
 
         Args:
@@ -322,8 +358,6 @@ class PointFusionMultiView(nn.Module):
         Returns:
             torch.Tensor: Single level image features of each point.
         """
-
-        print("img meta =", img_meta)
 
         pcd_scale_factor = (
             img_meta["pcd_scale_factor"] if "pcd_scale_factor" in img_meta.keys() else 1
@@ -339,8 +373,6 @@ class PointFusionMultiView(nn.Module):
             else torch.eye(3).type_as(pts).to(pts.device)
         )
 
-        print("img meta =", img_meta)
-
         img_scale_factor = (
             pts.new_tensor(img_meta["scale_factor"][:2])
             if "scale_factor" in img_meta.keys()
@@ -355,12 +387,10 @@ class PointFusionMultiView(nn.Module):
             else 0
         )
 
-        print("img meta =", img_meta.keys())
-
         img_pts = point_sample(
             img_feats,
             pts,
-            pts.new_tensor(img_meta["lidar2img"][i]),
+            pts.new_tensor(img_meta["lidar2img"][cam_idx]),
             pcd_rotate_mat,
             img_scale_factor,
             img_crop_offset,
