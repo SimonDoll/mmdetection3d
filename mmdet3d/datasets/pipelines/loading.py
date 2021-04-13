@@ -40,19 +40,50 @@ class LoadMultiViewImageFromFiles(object):
                 - scale_factor (float): Scale factor.
                 - img_norm_cfg (dict): Normalization configuration of images.
         """
-        filename = results["img_filename"]
-        imgs = [mmcv.imread(name, self.color_type) for name in filename]
-        if self.to_float32:
-            imgs = [img.astype(np.float32) for img in imgs]
-        results["filename"] = filename
-        results["img"] = imgs
-        # assuming that all images have the same shape
-        results["img_shape"] = imgs[0].shape
-        results["ori_shape"] = imgs[0].shape
+        filenames = results["img_filename"]
+        camera_names = results["camera_names"]
+
+        # we assume img_filename to be list of same order as camera_names
+        assert len(filenames) == len(camera_names)
+
+        imgs = {cam: mmcv.imread(f, self.color_type)
+                for cam, f in zip(camera_names, filenames)}
+
+        img_shape = None
+
+        img_fields = []
+        for cam, img in imgs.items():
+            if self.to_float32:
+                img = img.astype(np.float32)
+
+            # add each image as a seperate key to the config (needed for the transform modules)
+            results[cam] = img
+
+            # register the fields
+            img_fields.append(cam)
+
+            if img_shape is None:
+                img_shape = img.shape
+            else:
+                assert img_shape == img.shape, "multi view images of different sizes"
+
+        results["img_fields"] = img_fields
+
+        results["filename"] = filenames
+        results["img_shape"] = img_shape
+        results["ori_shape"] = img_shape
         # Set initial values for default meta_keys
-        results["pad_shape"] = imgs[0].shape
-        results["scale_factor"] = np.ones((len(imgs[0].shape),))
-        num_channels = 1 if len(imgs[0].shape) < 3 else imgs[0].shape[2]
+        results["pad_shape"] = img_shape
+
+        # TODO refactor
+        # the scale computation in mmdetection resize relies on the scale parameter (is extracted from img)
+        # this can not be done in the case of multi view imgs
+        # we therefore set that scale here to bypass this
+        scale_factor = 1.0
+        results["scale"] = tuple(
+            [int(x * scale_factor) for x in img_shape][::-1])
+
+        num_channels = 1 if len(img_shape) < 3 else img_shape[2]
         results["img_norm_cfg"] = dict(
             mean=np.zeros(num_channels, dtype=np.float32),
             std=np.ones(num_channels, dtype=np.float32),
@@ -69,7 +100,7 @@ class LoadMultiViewImageFromFiles(object):
         )
 
 
-@PIPELINES.register_module()
+@ PIPELINES.register_module()
 class LoadPointsFromMultiSweeps(object):
     """Load points from multiple sweeps.
 
