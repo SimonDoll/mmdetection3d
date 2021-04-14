@@ -135,7 +135,18 @@ class AugmentPointsWithImageFeatures:
         valid_points = results["points"].tensor[colored_points_mask]
         valid_points = valid_points[:, self._use_dim]
 
-        points = torch.cat((valid_points, valid_point_colors), dim=1)
+        valid_points = torch.cat((valid_points, valid_point_colors), dim=1)
+
+        # collect all points that lie outside the images
+        invalid_points = results["points"].tensor[~colored_points_mask]
+        invalid_points = invalid_points[:, self._use_dim]
+
+        # zero pad the missing color channels
+        invalid_points = torch.cat((invalid_points, torch.zeros(
+            (len(invalid_points), valid_point_colors.size(1)))), dim=1)
+
+        points = torch.cat([valid_points, invalid_points], dim=0)
+
         points_class = get_points_type(self._coord_type)
         # TODO attributes
         points = points_class(
