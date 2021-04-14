@@ -18,7 +18,7 @@ class AugmentPointsWithImageFeatures:
         filter_non_matched=True,
         coord_type="LIDAR",
         use_dim=[0, 1, 2, 3],
-        filter_close=0.5,
+        filter_close=0.05,
     ):
         """
         Args:
@@ -179,7 +179,7 @@ class AugmentPrevPointsWithImageFeatures:
         filter_non_matched=True,
         coord_type="LIDAR",
         max_sweeps=10,
-        filter_close=0.5,
+        filter_close=0.05,
         use_dim=[0, 1, 2, 3],
     ):
         """

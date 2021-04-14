@@ -18,7 +18,7 @@ class PointsToDepthMap:
 
     def __init__(
         self,
-        filter_close=0.5,
+        filter_close=0.05,
     ):
         """
 
