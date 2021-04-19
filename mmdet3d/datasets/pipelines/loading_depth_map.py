@@ -220,12 +220,12 @@ class SparseToDense:
     """Upsamples the point cloud utilizing the sparse to dense approach.
     """
 
-    def __init__(self, checkpoint_path, road_crop=(150, 0, 750, 1600), img_idxs=[0]):
+    def __init__(self, checkpoint_path, road_crop=(450, 0, 450, 1600), img_idxs=[0]):
         """Module to apply sparse to dense for point cloud upsampling
 
         Args:
             checkpoint_path (str): Path to sparse to dense model state dict
-            road_crop (tuple, optional): Road crop for images, y0, x0, height, width. Defaults to (150,0,750,1600).
+            road_crop (tuple, optional): Road crop for images, y0, x0, height, width. Defaults to (450,0,450,1600).
         """
         # h x w
         self._output_size = (road_crop[2], road_crop[3])
