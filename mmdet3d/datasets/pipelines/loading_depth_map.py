@@ -59,7 +59,7 @@ class PointsToDepthMap:
 
         for img_idx in range(len(lidar2imgs)):
             img_mat = lidar2imgs[img_idx]
-            img = imgs[img_idx]
+            # img = imgs[img_idx]
 
             # h x w
             depth_map = torch.zeros(imgs[img_idx].shape[0:2])
@@ -76,6 +76,7 @@ class PointsToDepthMap:
 
             # normalize the projected coordinates
             depth = projected_points[:, 2]
+
             # add an epsilon to prevent division by zero
             depth[depth == 0.0] = torch.finfo(torch.float32).eps
 
@@ -102,10 +103,9 @@ class PointsToDepthMap:
             else:
                 valid_points_mask = torch.logical_and(mask_x, mask_y)
 
+            # keep the depth for all unset pixels at 0.0 (convention from sparse2dense)
             # use only the points inside the image
             projected_points = projected_points[valid_points_mask]
-
-            # keep the depth for all unset pixels at 0.0 (convention from sparse2dense)
 
             # h x w
             depth_map[projected_points[:, 1].long(
@@ -115,6 +115,12 @@ class PointsToDepthMap:
             depth_map = torch.unsqueeze(depth_map, dim=-1)
 
             depth_maps.append(depth_map.numpy())
+
+        # import meshio
+        # mesh = meshio.Mesh(
+        #     points=points[:, 0:3].cpu().numpy(), cells=[])
+        # mesh.write(
+        #     "/workspace/work_dirs/debug/rich/cloud_before.ply", binary=True)
 
         results['depth_maps'] = depth_maps
 
@@ -145,6 +151,37 @@ class DepthMapToPoints:
     ):
         # TODO how to deal with overlapping images?
         self._coord_type = coord_type
+
+    @staticmethod
+    def write_pointcloud(filename, xyz_points, rgb_points=None):
+        import struct
+        print(xyz_points.shape)
+
+        assert xyz_points.shape[1] == 3, 'Input XYZ points should be Nx3 float array'
+        if rgb_points is None:
+            rgb_points = np.ones(xyz_points.shape).astype(np.uint8)*255
+        assert xyz_points.shape == rgb_points.shape, 'Input RGB colors should be Nx3 float array and have same size as input XYZ points'
+
+        # Write header of .ply file
+        fid = open(filename, 'wb')
+        fid.write(bytes('ply\n', 'utf-8'))
+        fid.write(bytes('format binary_little_endian 1.0\n', 'utf-8'))
+        fid.write(bytes('element vertex %d\n' % xyz_points.shape[0], 'utf-8'))
+        fid.write(bytes('property float x\n', 'utf-8'))
+        fid.write(bytes('property float y\n', 'utf-8'))
+        fid.write(bytes('property float z\n', 'utf-8'))
+        fid.write(bytes('property uchar red\n', 'utf-8'))
+        fid.write(bytes('property uchar green\n', 'utf-8'))
+        fid.write(bytes('property uchar blue\n', 'utf-8'))
+        fid.write(bytes('end_header\n', 'utf-8'))
+
+        # Write 3D points to .ply file
+        for i in range(xyz_points.shape[0]):
+            fid.write(bytearray(struct.pack("fffccc", xyz_points[i, 0], xyz_points[i, 1], xyz_points[i, 2],
+                                            rgb_points[i, 0].tostring(
+            ), rgb_points[i, 1].tostring(),
+                rgb_points[i, 2].tostring())))
+        fid.close()
 
     def __call__(self, results):
 
@@ -209,6 +246,35 @@ class DepthMapToPoints:
             # TODO how to hanle overlapping images?
             points.append(points_lidar[:, 0:3])
 
+            # import meshio
+            # mesh = meshio.Mesh(
+            #     points=points_lidar[:, 0:3].cpu().numpy(), cells=[])
+            # mesh.write(
+            #     "/workspace/work_dirs/debug/rich/cloud_after.ply", binary=True)
+
+            # # append color
+            # # list cameras[h x w x channels]
+            # imgs = results["img"]
+            # img = imgs[img_idx]
+
+            # # h x w x color channels
+            # img = torch.from_numpy(img).to(device)
+            # print("img shape =", img.shape)
+
+            # print("lidar = ", points_lidar.shape)
+            # points_rgb = torch.ones((len(valid_idxs), 3))
+
+            # img_rgb = img[:, :, [2, 1, 0]]
+            # points_rgb = img_rgb[valid_y_idxs, valid_x_idxs]
+
+            # points_rgb = points_rgb.numpy().astype(np.uint8)
+            # points_lidar_vis = points_lidar[:, 0:3].numpy()
+
+            # self.write_pointcloud(
+            #     "/workspace/work_dirs/debug/rich/pointcloud__colored.ply", points_lidar_vis, points_rgb)
+
+            # exit(0)
+
         points = torch.cat(points, dim=0)
 
         points_class = get_points_type(self._coord_type)
@@ -239,9 +305,11 @@ class SparseToDense:
         state_dict = torch.load(checkpoint_path)
         self._model = self._build_model(state_dict)
 
-    def _build_model(self, state_dict, in_channels=4, layers=50, decoder="deconv3",):
+    def _build_model(self, state_dict, in_channels=4, layers=18, decoder="deconv3",):
         model = sparse_to_dense.models.ResNet(
             layers=layers, decoder=decoder, output_size=self._output_size, in_channels=in_channels)
+
+        model = torch.nn.DataParallel(model).cuda()
 
         model.load_state_dict(state_dict)
         model.eval()
@@ -261,11 +329,22 @@ class SparseToDense:
             depth_map = depth_maps[cam_idx]
             # apply roi cropping (to avoid depth estimation on sky areas)
 
+            # from dataset_3d.utils.visualization_utils import depth_to_img
+            # import cv2
+
+            # vis_dm_before = depth_to_img(depth_map.copy(), max_depth=1000)
+
+            # cv2.imwrite(
+            #     "/workspace/work_dirs/debug/rich/dm_before.jpg", vis_dm_before)
+
             y0 = self._road_crop[0]
             x0 = self._road_crop[1]
 
             y1 = y0 + self._road_crop[2]
             x1 = x0 + self._road_crop[3]
+
+            # store orignal image size (before crop)
+            img_shape = img.shape
 
             # road crop
             img = img[y0:y1, x0:x1]
@@ -282,12 +361,29 @@ class SparseToDense:
             rgbd = torch.cat((img, depth_map), dim=-1).unsqueeze(dim=0)
             # reshape to 1x4xHxW
             rgbd = rgbd.permute(0, 3, 1, 2)
-            upsampled_depth_map = self._model(rgbd)
+            with torch.no_grad():
+                upsampled_depth_map = self._model(rgbd)
 
             # reshape to default img format (h x w x 1) (drop batch dimension)
             upsampled_depth_map = upsampled_depth_map[0].detach().permute(
                 1, 2, 0)
-            upsampled_depth_maps.append(upsampled_depth_map.numpy())
+
+            upsampled_depth_map_full_size = torch.zeros(
+                (img_shape[0], img_shape[1], 1))
+
+            upsampled_depth_map_full_size[y0:y1, x0:x1] = upsampled_depth_map
+
+            # from dataset_3d.utils.visualization_utils import depth_to_img
+            # import cv2
+
+            # vis_dm_after = depth_to_img(
+            #     upsampled_depth_map_full_size.cpu().numpy().copy(), max_depth=1000)
+
+            # cv2.imwrite(
+            #     "/workspace/work_dirs/debug/rich/dm_after.jpg", vis_dm_after)
+
+            upsampled_depth_maps.append(
+                upsampled_depth_map_full_size.cpu().numpy())
 
         results["depth_maps"] = upsampled_depth_maps
 
