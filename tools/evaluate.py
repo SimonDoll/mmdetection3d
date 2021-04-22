@@ -38,6 +38,9 @@ from mmdet3d.core.evaluation.evaluation_3d.matchers import GreedyMatcher, Hungar
 
 class EvalPipeline:
 
+    _dist_eval_intervals = [0, 20, 40, 60, 80, 100, 120]
+    _m_ap_steps = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+
     def __init__(self, args):
         self._init_cfg(args.config_file)
         # set random seeds
@@ -48,6 +51,19 @@ class EvalPipeline:
         self._init_model(args.checkpoint_file)
 
         self._temp_dir = tempfile.TemporaryDirectory()
+
+        if args.out:
+            self._result_base_path = pathlib.Path(
+                args.out).joinpath("pkl_results")
+            print("Results will be saved in: {}".format(self._result_base_path))
+
+        else:
+            self._result_base_path = pathlib.Path(str(self._temp_dir.name))
+
+        self._intermediate_res_path = self._result_base_path.joinpath(
+            "pkl_results")
+
+        self._intermediate_res_path.mkdir()
 
         self._init_metrics()
 
@@ -64,12 +80,13 @@ class EvalPipeline:
 
         self.cfg.model.pretrained = None
         self.cfg.data.val.test_mode = False  # Assure to get ground truth
+        self.cfg.data.test.test_mode = False  # Assure to get ground truth
 
     def _init_data(self):
         # build the dataloader
         # TODO right config (train / val / test?)
         samples_per_gpu = 1
-        dataset = build_dataset(self.cfg.data.val)
+        dataset = build_dataset(self.cfg.data.test)
         self.data_loader = build_dataloader(
             dataset,
             samples_per_gpu=samples_per_gpu,
@@ -114,8 +131,9 @@ class EvalPipeline:
         # metrics
         avg_precision_metric = AveragePrecision(
             similarity_threshold=self._similarity_threshold, reversed_score=self._reversed_score)
+
         mean_avg_precision_metric = MeanAveragePrecision(
-            [0.2, 0.5, 0.8], reversed_score=self._reversed_score)
+            self._m_ap_steps, reversed_score=self._reversed_score)
 
         recall_metric = Recall(self._similarity_threshold)
         precision_metric = Precision(self._similarity_threshold)
@@ -166,8 +184,8 @@ class EvalPipeline:
                     'data': data
                 }
 
-                result_path = pathlib.Path(
-                    str(self._temp_dir.name)).joinpath(str(i) + ".pkl")
+                result_path = self._intermediate_res_path.joinpath(
+                    str(i) + ".pkl")
                 # pickle the data to avoid shared memory overflow
                 with open(result_path, "wb") as fp:
                     pickle.dump(result_with_gt_and_data, fp)
@@ -259,18 +277,33 @@ class EvalPipeline:
         multi_distance_metric_annoated = MultiDistanceMetric(
             self.cat2id.values(),
             self._metric_pipeline_annotated,
-            distance_intervals=[0, 20, 40, 70, 100],
+            distance_intervals=self._dist_eval_intervals,
             similarity_measure=self._similarity_measure,
             reversed_score=self._reversed_score,
             matcher=self._matcher,
             additional_filter_pipeline=None,
         )
-        # TODO critical clean up and eval non annotated as well
-        interval_results_annotated = multi_distance_metric_annoated.evaluate(
+        multi_distance_metric_non_annoated = MultiDistanceMetric(
+            self.cat2id.values(),
+            self._metric_pipeline_non_annoated,
+            distance_intervals=self._dist_eval_intervals,
+            similarity_measure=self._similarity_measure,
+            reversed_score=self._reversed_score,
+            matcher=self._matcher,
+            additional_filter_pipeline=None,
+        )
+
+        interval_results_annotated = multi_distance_metric_non_annoated.evaluate(
             annotated_paths)
 
         MultiDistanceMetric.print_results(
             interval_results_annotated, '/workspace/work_dirs/plots')
+
+        interval_results_non_annotated = multi_distance_metric_non_annoated.evaluate(
+            non_annoated_paths)
+
+        MultiDistanceMetric.print_results(
+            interval_results_non_annotated, '/workspace/work_dirs/plots2')
 
     def _split_non_annoatated(self, result_paths):
         annotated = {}
@@ -300,133 +333,14 @@ class EvalPipeline:
 
         self._eval_full_range(annotated_paths, non_annoated_paths)
         self._eval_distance_intervals(annotated_paths, non_annoated_paths)
-        # # no evaluate on distance intervals
-        # multi_distance_metric = MultiDistanceMetric(
-        #     self.cat2id.values(),
-        #     self._metric_pipeline_annotated,
-        #     distance_intervals=[0, 10, 20, 30],
-        #     similarity_measure=self._similarity_measure,
-        #     reversed_score=self._reversed_score,
-        #     matcher=self._matcher,
-        #     additional_filter_pipeline=None,
-        # )
-
-        # distance_interval_results = multi_distance_metric.evaluate(
-        #     result_paths)
-
-        # MultiDistanceMetric.print_results(distance_interval_results,
-        #                                   '/workspace/work_dirs/plots')
 
         end = datetime.datetime.now()
         print('runtime eval millis =', (end - start).total_seconds() * 1000)
 
-    def compute_metrics2(self, inference_results):
-        raise NotImplementedError()
-        start = datetime.datetime.now()
-
-        similarity_measure = Iou()
-        # similarity_measure = CenterDistance2d()
-
-        # if centerpoint dist reverse matching order (lower is better)
-        reversed_score = False
-
-        filter_points_in_box = MinPointsInGtFilter()
-
-        filter_pipeline = FilterPipeline([filter_points_in_box])
-
-        matcher = GreedyMatcher(self.cat2id.values())
-
-        similarity_threshold = 0.5
-        # metrics
-        avg_precision_metric = AveragePrecision(
-            similarity_threshold=similarity_threshold,
-            reversed_score=reversed_score)
-
-        precision_per_class = PrecisionPerClass(
-            similarity_threshold=similarity_threshold,
-            reversed_score=reversed_score)
-
-        recall_per_class = RecallPerClass(
-            similarity_threshold=similarity_threshold,
-            reversed_score=reversed_score)
-
-        # mean_avg_precision_metric = MeanAveragePrecision(
-        #     [0.5, 1, 2, 4], reversed_score=reversed_score)
-
-        mean_avg_precision_metric = MeanAveragePrecision(
-            [0.3, 0.5, 0.7], reversed_score=reversed_score)
-
-        precision = Precision(similarity_threshold, reversed_score)
-        recall = Recall(similarity_threshold, reversed_score)
-
-        metric_pipeline = MetricPipeline([
-            avg_precision_metric, precision_per_class, recall_per_class,
-            mean_avg_precision_metric, precision, recall
-        ])
-
-        inference_results_preprocessed = []
-
-        for data_id, res in enumerate(tqdm.tqdm(inference_results)):
-            # TODO check if this result format holds for all models
-
-            # get inference resutls and input data
-            input_data = res['data']
-            inference_result = res['result'][0]
-
-            inference_result = inference_result['pts_bbox']
-
-            pred_boxes = inference_result['boxes_3d']
-
-            pred_labels = inference_result['labels_3d']
-            pred_scores = inference_result['scores_3d']
-            # gt are wrapped in additional lists
-            # TODO check reason
-            gt_boxes = inference_result['gt_bboxes_3d'][0][0]
-            gt_labels = inference_result['gt_labels_3d'][0][0]
-
-            res_preprocessed = {
-                'input_data': input_data,
-                'gt_boxes': gt_boxes,
-                'pred_boxes': pred_boxes,
-                'gt_labels': gt_labels,
-                'pred_labels': pred_labels,
-                'pred_scores': pred_scores,
-            }
-            inference_results_preprocessed.append(res_preprocessed)
-
-        print("frames =", len(inference_results_preprocessed))
-
-        multi_distance_metric = MultiDistanceMetric(
-            self.cat2id.values(),
-            metric_pipeline,
-            distance_intervals=[0, 10, 20, 30],
-            similarity_measure=similarity_measure,
-            reversed_score=reversed_score,
-            matcher=matcher,
-            additional_filter_pipeline=filter_pipeline,
-        )
-
-        distance_interval_results = multi_distance_metric.evaluate(
-            inference_results_preprocessed)
-
-        MultiDistanceMetric.print_results(distance_interval_results,
-                                          '/workspace/work_dirs/plots')
-
-        # for dist in distance_interval_results:
-        #     print("interval =", dist["min_dist"], ",", dist["max_dist"])
-        #     print("gt =", dist["gt_count"], ", pred =", dist["pred_count"])
-        #     # print("res =", dist["results"])
-        #     MetricPipeline.print_results(dist["results"])
-
-        end = datetime.datetime.now()
-        print('runtime eval millis =', (end - start).total_seconds() * 1000)
-
-    def run_eval(self, tmpdir=None):
+    def run_eval(self):
         """Runs inference on the validation dataset specified by the model and
         computes metrics.
 
-        Args:
-            tmpdir (str, optional): Folder to save intermediate results to (mainly for debugging). Defaults to None.
         """
         self.model = MMDataParallel(self.model, device_ids=[0])
         result_paths = self._single_gpu_eval()
@@ -442,8 +356,8 @@ if __name__ == '__main__':
     parser.add_argument(
         'checkpoint_file', type=str, help='Trained model checkpoint')
 
-    # TODO output folder
-    # parser.add_argument('--out', help='output result file in pickle format')
+    parser.add_argument(
+        '--out', help='output result file in pickle format', default=None)
 
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument(
