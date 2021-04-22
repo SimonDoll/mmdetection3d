@@ -10,6 +10,7 @@ import tempfile
 import datetime
 import pathlib
 import json
+from mmdet3d.core.evaluation.evaluation_3d import similarity_measure
 
 import torch
 import pickle
@@ -43,7 +44,14 @@ class EvalPipeline:
     _cat_to_id_file_name = "cat2id.json"
 
     _dist_eval_intervals = [0, 20, 40, 60, 80, 100, 120]
-    _m_ap_steps = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+    _m_ap_steps_iou = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+    _m_ap_steps_cd = [0.1, 0.5, 1.0, 2.0, 5.0]
+
+    _ap_steps_iou = [0.5, 0.75]
+    _ap_steps_cd = [0.1, 0.5, 1.0, 2.0, 5.0]
+
+    _tp_metrics_iou = 0.5
+    _tp_metrics_cd = 2.0
 
     def __init__(self, args):
         self._precompute_path = pathlib.Path(args.precompute_path)
@@ -64,7 +72,11 @@ class EvalPipeline:
             self._cat2id = json.load(fp)
         self._init_metrics()
 
-    def _init_metrics(self, similarity_threshold=0.5):
+    def _init_metrics(self, sim_measure):
+
+        if sim_measure == "iou":
+            self._similarity_measure = Iou()
+
         self._similarity_measure = Iou()
         # similarity_measure = CenterDistance2d()
 
@@ -95,7 +107,7 @@ class EvalPipeline:
         self._metric_pipeline_non_annoated = MetricPipeline(
             [fp_per_frame_metric])
 
-    def _eval_preprocess(self, result_paths):
+    def _eval_preprocess(self, result_paths, similarity_measure, reversed_score):
         annotation_count = 0
         annotated_frames_count = 0
         non_annotated_frames_count = 0
@@ -120,7 +132,7 @@ class EvalPipeline:
             gt_labels = result['gt_labels']
 
             # calculate the similarity for the boxes
-            similarity_scores = self._similarity_measure.calc_scores(
+            similarity_scores = similarity_measure.calc_scores(
                 gt_boxes, pred_boxes, gt_labels, pred_labels)
 
             # match gt and predictions
@@ -132,8 +144,7 @@ class EvalPipeline:
                 pred_labels,
                 pred_scores,
                 data_id,
-                reversed_score=self._reversed_score,
-
+                reversed_score=reversed_score,
             )
 
             for c in single_matching_result.keys():
@@ -149,59 +160,70 @@ class EvalPipeline:
 
         return matching_results, annotated_frames_count, non_annotated_frames_count, annotation_count
 
-    def _eval_full_range(self, annotated_paths, non_annoated_paths):
-        # annoated frames
-        matchings_annotated, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
-            annotated_paths)
+    def _eval_single(self, similarity_measure, reversed_score, pipeline, result_paths):
+        full_range_results = self._eval_single_full_range(
+            similarity_measure, reversed_score, pipeline, result_paths)
 
-        print("=" * 40)
-        print("Eval on annotated frames ({}) with {} annotations".format(
-            annotated_frames_count, annotation_count))
-        result_annotated = self._metric_pipeline_annotated.evaluate(
-            matchings_annotated)
-        self._metric_pipeline_annotated.print_results(result_annotated)
+        multi_range_results = self._eval_single_multi_range(
+            similarity_measure,  reversed_score, pipeline, result_paths)
 
-        # non annotated frames
-        matchings_non_annotated, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
-            non_annoated_paths)
-        print("=" * 40)
-        print("Eval on non annotated frames ({})".format(
-            non_annotated_frames_count))
-        result_non_annotated = self._metric_pipeline_non_annoated.evaluate(
-            matchings_non_annotated)
-        self._metric_pipeline_non_annoated.print_results(result_non_annotated)
+        # TODO critical combine results here
 
-    def _eval_distance_intervals(self, annotated_paths, non_annoated_paths):
-        multi_distance_metric_annoated = MultiDistanceMetric(
-            self._cat2id.values(),
-            self._metric_pipeline_annotated,
-            distance_intervals=self._dist_eval_intervals,
-            similarity_measure=self._similarity_measure,
-            reversed_score=self._reversed_score,
-            matcher=self._matcher,
-            additional_filter_pipeline=None,
-        )
-        multi_distance_metric_non_annoated = MultiDistanceMetric(
-            self._cat2id.values(),
-            self._metric_pipeline_non_annoated,
-            distance_intervals=self._dist_eval_intervals,
-            similarity_measure=self._similarity_measure,
-            reversed_score=self._reversed_score,
-            matcher=self._matcher,
-            additional_filter_pipeline=None,
-        )
+    def _eval_single_full_range(self, similarity_measure, reversed_score, pipeline, result_paths):
+        matchings, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
+            result_paths, similarity_measure, reversed_score)
 
-        interval_results_annotated = multi_distance_metric_annoated.evaluate(
-            annotated_paths)
+        eval_results = pipeline.evaluate(matchings)
+        return eval_results
 
-        MultiDistanceMetric.print_results(
-            interval_results_annotated, '/workspace/work_dirs/plots')
+    def _eval_single_multi_range(self, similarity_measure, reversed_score, pipeline, result_paths):
 
-        interval_results_non_annotated = multi_distance_metric_non_annoated.evaluate(
-            non_annoated_paths)
+        metrics = MultiDistanceMetric(
+            self._cat2id.values(), pipeline, self._dist_eval_intervals,
+            matcher=self._matcher, similarity_measure=similarity_measure, reversed_score=reversed_score)
 
-        MultiDistanceMetric.print_results(
-            interval_results_non_annotated, '/workspace/work_dirs/plots2')
+        eval_interval_results = metrics.evaluate(
+            result_paths)
+        return eval_interval_results
+
+    def _eval_iterate(self, sim_measure_config, result_paths):
+        """iterates all thresholds and similarity measures and evals each combination
+
+        sim_measure_config (dict): dict has as keys the similarity measure name, the values are dicts {aps, map, tp : } that contain lists / a value for tp metrics thresh of the thresholds to use for the corresponding metrics
+
+        """
+
+        for sim_measure_name, thresholds in sim_measure_config.items():
+            if sim_measure_name == "iou":
+                sim_measure = Iou()
+                reversed_score = False
+            elif sim_measure_name == "centerdist":
+                sim_measure = CenterDistance2d()
+                reversed_score = True
+            else:
+                raise ValueError(
+                    "unknown sim measure: {}".format(sim_measure_name))
+
+            ap_threshs = thresholds['aps']
+            map_thresh_list = thresholds['map']
+
+            tp_metric_thresh = thresholds['tp']
+
+            # build metrics
+            metrics = []
+            for ap_thresh in ap_threshs:
+                ap = AveragePrecision(ap_thresh, reversed_score)
+                metrics.append(ap)
+
+            map = MeanAveragePrecision(map_thresh_list, reversed_score)
+            metrics.append(map)
+
+            # TODO critical tp metrics
+
+            # build up a pipeline
+            pipeline = MetricPipeline(metrics)
+            results = self._eval_single(sim_measure, reversed_score, pipeline)
+            # TODO do something with the results
 
     def _split_non_annoatated(self, result_paths):
         annotated = {}
@@ -254,6 +276,9 @@ if __name__ == '__main__':
 
     parser.add_argument(
         'precompute_path', help='Folder containing eval precomutes')
+
+    parser.add_argument(
+        '--similarity', choices=['iou', 'centerdist'], help="Used similarity measure")
 
     args = parser.parse_args()
 
