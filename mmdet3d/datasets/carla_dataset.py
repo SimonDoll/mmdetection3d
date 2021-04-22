@@ -12,7 +12,7 @@ from ..core import show_result
 from ..core.bbox import Box3DMode, LiDARInstance3DBoxes
 from .custom_3d import Custom3DDataset
 
-from mmdet3d.core.evaluation.evaluation_3d.matchers import GreedyMatcher
+from mmdet3d.core.evaluation.evaluation_3d.matchers import HungarianMatcher
 from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import CenterDistance2d, Iou
 from mmdet3d.core.evaluation.evaluation_3d.metrics import AveragePrecision, MeanAveragePrecision, Recall, Precision, MetricPipeline, FalsePositivesPerFrame
 
@@ -97,7 +97,7 @@ class CarlaDataset(Custom3DDataset):
 
         # setup the metric pipeline for evaluation
         # we use class ids for matching, cat2id can be used to assign a category name later on
-        self.matcher = GreedyMatcher(self.cat2id.values())
+        self.matcher = HungarianMatcher(self.cat2id.values())
         # similarity_meassure = Iou()
         self.similarity_meassure = Iou()
         # if centerpoint dist reverse matching order (lower is better)
