@@ -27,6 +27,9 @@ class EvalPipeline:
     _cat_to_id_file_name = "cat2id.json"
 
     _dist_eval_intervals = [0, 20, 40, 60, 80, 100, 120]
+
+    _gt_filter_bounds = [0, -40, 120, 40]
+
     _m_ap_steps_iou = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
     _m_ap_steps_cd = [0.1, 0.5, 1.0, 2.0, 5.0]
 
@@ -81,6 +84,11 @@ class EvalPipeline:
             gt_boxes = result['gt_boxes']
             gt_labels = result['gt_labels']
 
+            # check if the gt boxes are inside the required range
+            boxes_mask = gt_boxes.in_range_bev(self._gt_filter_bounds)
+            gt_boxes = gt_boxes[boxes_mask]
+            gt_labels = gt_labels[boxes_mask]
+
             # calculate the similarity for the boxes
             similarity_scores = similarity_measure.calc_scores(
                 gt_boxes, pred_boxes, gt_labels, pred_labels)
@@ -116,8 +124,8 @@ class EvalPipeline:
 
         MetricPipeline.print_results(full_range_results)
 
-        # multi_range_results = self._eval_single_multi_range(
-        #     similarity_measure,  reversed_score, pipeline, result_paths)
+        multi_range_results = self._eval_single_multi_range(
+            similarity_measure,  reversed_score, pipeline, result_paths)
 
         # MultiDistanceMetric.print_results(multi_range_results)
 
@@ -127,6 +135,9 @@ class EvalPipeline:
     def _eval_single_full_range(self, similarity_measure, reversed_score, pipeline, result_paths):
         matchings, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
             result_paths, similarity_measure, reversed_score)
+
+        print("annotated =", annotated_frames_count, "non annotated =",
+              non_annotated_frames_count, "gt count =", annotation_count)
 
         eval_results = pipeline.evaluate(matchings)
         return eval_results
@@ -214,6 +225,9 @@ class EvalPipeline:
         with open(self._result_paths_file) as fp:
             result_paths = json.load(fp)
 
+        annotated, non_annotated = self._split_non_annoatated(result_paths)
+        result_paths = list(annotated.values())
+
         start = datetime.datetime.now()
 
         # build up the threshold config (TODO with cmd line args)
@@ -226,7 +240,8 @@ class EvalPipeline:
               'tp': self._tp_metrics_cd}
 
         thresh_config = {'IoU': iou,
-                         'CenterDistance': cd}
+                         'CenterDistance': cd
+                         }
 
         # TODO where do we combine results and dump?
         self._eval_iterate(thresh_config, result_paths)

@@ -35,6 +35,7 @@ class MultiDistanceMetric:
         similarity_measure=None,
         reversed_score=False,
         additional_filter_pipeline=None,
+        gt_filter_bounds=[0, -40, 120, 40]
     ):
         """Creates the MultiDistanceMetric.
 
@@ -52,6 +53,8 @@ class MultiDistanceMetric:
             matcher = GreedyMatcher(classes)
 
         self._classes = classes
+
+        self._gt_filter_bounds = gt_filter_bounds
 
         self._similarity_measure = similarity_measure
         if not self._similarity_measure:
@@ -85,6 +88,12 @@ class MultiDistanceMetric:
         pred_scores = result['pred_scores']
         gt_boxes = result['gt_boxes']
         gt_labels = result['gt_labels']
+
+        # filter gts that lie outside the used pcd range
+        boxes_mask = gt_boxes.in_range_bev(self._gt_filter_bounds)
+        gt_boxes = gt_boxes[boxes_mask]
+        gt_labels = gt_labels[boxes_mask]
+
         input_data = result['data']
 
         # only consider boxes in the current distance interval
