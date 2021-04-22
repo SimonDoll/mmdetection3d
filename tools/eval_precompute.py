@@ -10,6 +10,7 @@ import tempfile
 import datetime
 import pathlib
 import json
+import logging
 
 import torch
 import pickle
@@ -41,22 +42,23 @@ class EvalPrecompute:
     _result_paths_file = "result_paths.json"
     _cat_to_id = "cat2id.json"
 
-    def __init__(self, args):
-        self._init_cfg(args.config_file)
+    def __init__(self, config_file, checkpoint, out, mode, seed=42, deterministic=True):
+        self._init_cfg(config_file)
         # set random seeds
-        if args.seed is not None:
-            set_random_seed(args.seed, deterministic=args.deterministic)
+        if seed is not None:
+            set_random_seed(seed, deterministic=deterministic)
 
-        self._result_base_path = pathlib.Path(args.out)
-        print("Results will be saved in: {}".format(self._result_base_path))
+        self._result_base_path = pathlib.Path(out)
+        logging.info("Results will be saved in: {}".format(
+            self._result_base_path))
 
         self._intermediate_res_path = self._result_base_path.joinpath(
             "pkl_results")
 
         self._intermediate_res_path.mkdir()
 
-        self._init_data(args.mode)
-        self._init_model(args.checkpoint_file)
+        self._init_data(mode)
+        self._init_model(checkpoint)
 
     def _init_cfg(self, config_file):
         self.cfg = Config.fromfile(config_file)
@@ -117,7 +119,7 @@ class EvalPrecompute:
         # if problems with backward compatibility (see test.py of mmdetection3d for a fix)
         self.model.CLASSES = checkpoint['meta']['CLASSES']
 
-    def _single_gpu_eval(self):
+    def _single_gpu_eval(self,):
         self.model.eval()
         dataset = self.data_loader.dataset
         prog_bar = mmcv.ProgressBar(len(dataset))
@@ -140,10 +142,18 @@ class EvalPrecompute:
 
                 result = self.model(return_loss=False, rescale=True, **data)
 
-                pred_boxes = result[0]['pts_bbox']['boxes_3d']
+                # TODO critical do clean checking for nested heads and allow multi head
+                is_nested = "pts_bbox" in result[0]
 
-                pred_labels = result[0]['pts_bbox']['labels_3d']
-                pred_scores = result[0]['pts_bbox']['scores_3d']
+                if is_nested:
+                    pred_boxes = result[0]['pts_bbox']['boxes_3d']
+                    pred_labels = result[0]['pts_bbox']['labels_3d']
+                    pred_scores = result[0]['pts_bbox']['scores_3d']
+
+                else:
+                    pred_boxes = result[0]['boxes_3d']
+                    pred_labels = result[0]['labels_3d']
+                    pred_scores = result[0]['scores_3d']
 
                 result_with_gt_and_data = {
                     'gt_boxes': gt_boxes,
@@ -208,5 +218,19 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    runner = EvalPrecompute(args)
+    config_file = args.config_file
+    assert pathlib.Path(config_file).is_file(), "config file does not exist"
+
+    checkpoint = args.checkpoint_file
+    assert pathlib.Path(checkpoint).is_file(), "checkpoint file does not exist"
+
+    out = args.out
+    assert pathlib.Path(out).is_dir(), "output folder does not exist"
+
+    seed = args.seed
+    deterministic = args.deterministic
+    mode = args.mode
+
+    runner = EvalPrecompute(config_file, checkpoint, out,
+                            mode, seed, deterministic)
     runner.run()
