@@ -189,7 +189,7 @@ class MultiDistanceMetric:
             gt_count_per_class[class_id] = 0
             pred_count_per_class[class_id] = 0
 
-        for data_id, result_path in result_paths.items():
+        for data_id, result_path in enumerate(result_paths):
             # perform matching
             m_result, preds_per_class, gts_per_class = self._preprocess_single(
                 result_path, data_id)

@@ -23,7 +23,7 @@ class MeanAveragePrecision(NumericMetric):
             similarity_threshold=None, reversed_score=reversed_score)
 
     def __str__(self):
-        return 'MeanAveragePrecision'
+        return 'mAP@{}'.format(self.similarities)
 
     @property
     def similarities(self):

@@ -10,32 +10,15 @@ import tempfile
 import datetime
 import pathlib
 import json
-from mmdet3d.core.evaluation.evaluation_3d import similarity_measure
 
-import torch
 import pickle
 import tqdm
-
-from mmcv import Config, DictAction
-from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
-from mmcv.runner import get_dist_info, init_dist, load_checkpoint
-
-from mmdet3d.apis import single_gpu_test
-from mmdet3d.datasets import build_dataloader, build_dataset
-from mmdet3d.models import build_detector
-from mmdet.apis import multi_gpu_test, set_random_seed
-from mmdet.core import wrap_fp16_model
-from mmdet.core import encode_mask_results
-from mmdet3d.core import BboxOverlapsNearest3D
-from mmdet3d.core import MaxIoUAssigner
-
-from tools.fuse_conv_bn import fuse_module
 
 
 from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import *
 from mmdet3d.core.evaluation.evaluation_3d.filters import *
 from mmdet3d.core.evaluation.evaluation_3d.metrics import *
-from mmdet3d.core.evaluation.evaluation_3d.matchers import GreedyMatcher, HungarianMatcher
+from mmdet3d.core.evaluation.evaluation_3d.matchers import HungarianMatcher
 
 
 class EvalPipeline:
@@ -70,42 +53,9 @@ class EvalPipeline:
         self._cat2id = None
         with open(self._cat_to_id_file) as fp:
             self._cat2id = json.load(fp)
-        self._init_metrics()
-
-    def _init_metrics(self, sim_measure):
-
-        if sim_measure == "iou":
-            self._similarity_measure = Iou()
-
-        self._similarity_measure = Iou()
-        # similarity_measure = CenterDistance2d()
-
-        # if centerpoint dist reverse matching order (lower is better)
-        self._reversed_score = False
 
         # we use class ids for matching, cat2id can be used to assign a category name later on
         self._matcher = HungarianMatcher(self._cat2id.values())
-
-        self._similarity_threshold = similarity_threshold
-
-        # metrics
-        avg_precision_metric = AveragePrecision(
-            similarity_threshold=self._similarity_threshold, reversed_score=self._reversed_score)
-
-        mean_avg_precision_metric = MeanAveragePrecision(
-            self._m_ap_steps, reversed_score=self._reversed_score)
-
-        recall_metric = Recall(self._similarity_threshold)
-        precision_metric = Precision(self._similarity_threshold)
-
-        fp_per_frame_metric = FalsePositivesPerFrame(
-            self._similarity_threshold)
-
-        self._metric_pipeline_annotated = MetricPipeline(
-            [avg_precision_metric, mean_avg_precision_metric, precision_metric, recall_metric, fp_per_frame_metric])
-
-        self._metric_pipeline_non_annoated = MetricPipeline(
-            [fp_per_frame_metric])
 
     def _eval_preprocess(self, result_paths, similarity_measure, reversed_score):
         annotation_count = 0
@@ -114,7 +64,7 @@ class EvalPipeline:
 
         matching_results = {c: [] for c in self._cat2id.values()}
 
-        for data_id, result_path in tqdm.tqdm(result_paths.items()):
+        for data_id, result_path in enumerate(result_paths):
 
             # TODO check if this result format holds for all models
             result = None
@@ -164,10 +114,15 @@ class EvalPipeline:
         full_range_results = self._eval_single_full_range(
             similarity_measure, reversed_score, pipeline, result_paths)
 
-        multi_range_results = self._eval_single_multi_range(
-            similarity_measure,  reversed_score, pipeline, result_paths)
+        MetricPipeline.print_results(full_range_results)
+
+        # multi_range_results = self._eval_single_multi_range(
+        #     similarity_measure,  reversed_score, pipeline, result_paths)
+
+        # MultiDistanceMetric.print_results(multi_range_results)
 
         # TODO critical combine results here
+        return full_range_results,  # multi_range_results
 
     def _eval_single_full_range(self, similarity_measure, reversed_score, pipeline, result_paths):
         matchings, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
@@ -194,10 +149,13 @@ class EvalPipeline:
         """
 
         for sim_measure_name, thresholds in sim_measure_config.items():
-            if sim_measure_name == "iou":
+            print("\n\n" + "=" * 40)
+            print("Similarity measure = : {}".format(sim_measure_name))
+            print("=" * 40)
+            if sim_measure_name == "IoU":
                 sim_measure = Iou()
                 reversed_score = False
-            elif sim_measure_name == "centerdist":
+            elif sim_measure_name == "CenterDistance":
                 sim_measure = CenterDistance2d()
                 reversed_score = True
             else:
@@ -222,13 +180,14 @@ class EvalPipeline:
 
             # build up a pipeline
             pipeline = MetricPipeline(metrics)
-            results = self._eval_single(sim_measure, reversed_score, pipeline)
+            results = self._eval_single(
+                sim_measure, reversed_score, pipeline, result_paths)
             # TODO do something with the results
 
     def _split_non_annoatated(self, result_paths):
         annotated = {}
         non_annoated = {}
-        for data_id, result_path in enumerate(tqdm.tqdm(result_paths)):
+        for data_id, result_path in enumerate(result_paths):
 
             # TODO check if this result format holds for all models
             result = None
@@ -245,18 +204,6 @@ class EvalPipeline:
                 annotated[data_id] = result_path
         return annotated, non_annoated
 
-    def compute_metrics(self, result_paths):
-        start = datetime.datetime.now()
-
-        annotated_paths, non_annoated_paths = self._split_non_annoatated(
-            result_paths)
-
-        self._eval_full_range(annotated_paths, non_annoated_paths)
-        self._eval_distance_intervals(annotated_paths, non_annoated_paths)
-
-        end = datetime.datetime.now()
-        print('runtime eval millis =', (end - start).total_seconds() * 1000)
-
     def run_eval(self):
         """Runs inference on the validation dataset specified by the model and
         computes metrics.
@@ -267,7 +214,25 @@ class EvalPipeline:
         with open(self._result_paths_file) as fp:
             result_paths = json.load(fp)
 
-        self.compute_metrics(result_paths)
+        start = datetime.datetime.now()
+
+        # build up the threshold config (TODO with cmd line args)
+        iou = {'aps': self._ap_steps_iou,
+               'map': self._m_ap_steps_iou,
+               'tp': self._tp_metrics_iou}
+
+        cd = {'aps': self._ap_steps_cd,
+              'map': self._m_ap_steps_cd,
+              'tp': self._tp_metrics_cd}
+
+        thresh_config = {'IoU': iou,
+                         'CenterDistance': cd}
+
+        # TODO where do we combine results and dump?
+        self._eval_iterate(thresh_config, result_paths)
+
+        end = datetime.datetime.now()
+        print('runtime eval millis =', (end - start).total_seconds() * 1000)
 
 
 if __name__ == '__main__':

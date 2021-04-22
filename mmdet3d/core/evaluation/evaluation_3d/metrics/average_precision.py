@@ -16,7 +16,7 @@ class AveragePrecision(NumericClassMetric):
             similarity_threshold, reversed_score=reversed_score)
 
     def __str__(self):
-        return 'AveragePrecision'
+        return 'AP@{}'.format(self._similarity_threshold)
 
     def compute(self, matching_results, data=None):
         """Computes the average precision, may be used by other metrics. Should
