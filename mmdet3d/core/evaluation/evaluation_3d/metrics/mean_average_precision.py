@@ -23,7 +23,35 @@ class MeanAveragePrecision(NumericMetric):
             similarity_threshold=None, reversed_score=reversed_score)
 
     def __str__(self):
-        return 'mAP@{}'.format(self.similarities)
+
+        # for equally spaced intervalls we can use a short string representation:
+        # [start:stop:step]
+        short_repr = True
+        diff = None
+        if len(self._similarities) > 2:
+
+            for i in range(len(self._similarities)-1):
+                curr_t = self._similarities[i]
+                next_t = self._similarities[i+1]
+
+                if diff is None:
+                    diff = next_t - curr_t
+                else:
+                    if not np.isclose(diff, next_t-curr_t):
+                        # not equally spaced diffs
+                        short_repr = False
+                        break
+
+        else:
+            short_repr = False
+
+        if short_repr:
+            name = 'mAP@[{:.2f},{:.2f}:{:.2f}]'.format(self._similarities[0],
+                                                       self._similarities[-1], diff)
+        else:
+            name = 'mAP@{}'.format(self.similarities)
+
+        return name
 
     @property
     def similarities(self):
