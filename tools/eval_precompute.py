@@ -55,7 +55,7 @@ class EvalPrecompute:
 
         self._intermediate_res_path.mkdir()
 
-        self._init_data()
+        self._init_data(args.mode)
         self._init_model(args.checkpoint_file)
 
     def _init_cfg(self, config_file):
@@ -69,11 +69,20 @@ class EvalPrecompute:
         self.cfg.data.val.test_mode = False  # Assure to get ground truth
         self.cfg.data.test.test_mode = False  # Assure to get ground truth
 
-    def _init_data(self):
+    def _init_data(self, mode):
         # build the dataloader
-        # TODO right config (train / val / test?)
         samples_per_gpu = 1
-        dataset = build_dataset(self.cfg.data.test)
+
+        dataset = None
+        if mode == "train":
+            dataset = build_dataset(self.cfg.data.train)
+        elif mode == "test":
+            dataset = build_dataset(self.cfg.data.test)
+        elif mode == "val":
+            dataset = build_dataset(self.cfg.data.val)
+        else:
+            raise ValueError("unsupportet dataset type {}".format(mode))
+
         self.data_loader = build_dataloader(
             dataset,
             samples_per_gpu=samples_per_gpu,
@@ -116,14 +125,15 @@ class EvalPrecompute:
         result_paths = []
         for i, data in enumerate(self.data_loader):
 
-            # TODO remove
-            if i > 10:
-                break
+            # # TODO remove
+            # if i > 10:
+            #     break
 
             with torch.no_grad():
                 annos = dataset.get_ann_info(i)
 
                 gt_boxes = annos['gt_bboxes_3d']
+
                 gt_labels = annos['gt_labels_3d']
                 # gt labels are a numpy array -> bring to torch
                 gt_labels = torch.from_numpy(gt_labels)
@@ -131,6 +141,7 @@ class EvalPrecompute:
                 result = self.model(return_loss=False, rescale=True, **data)
 
                 pred_boxes = result[0]['pts_bbox']['boxes_3d']
+
                 pred_labels = result[0]['pts_bbox']['labels_3d']
                 pred_scores = result[0]['pts_bbox']['scores_3d']
 
@@ -191,6 +202,9 @@ if __name__ == '__main__':
         action='store_true',
         help='whether to set deterministic options for CUDNN backend.',
     )
+
+    parser.add_argument(
+        "--mode", type=str, choices=["train", "test", "val"], help="Dataset to use", default="test")
 
     args = parser.parse_args()
 
