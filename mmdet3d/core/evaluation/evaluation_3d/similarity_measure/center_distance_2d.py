@@ -14,6 +14,7 @@ class CenterDistance2d(SimilarityMeasure):
         # this way the best score is the maximum
         center_distances = torch.zeros(len(pred_boxes), len(gt_boxes))
 
+        # center is bottom center (but doesen't matter as we only use bev (x/y) plane)
         gt_centers_2d = gt_boxes.center[:, :2]
         pred_centers_2d = pred_boxes.center[:, :2]
 

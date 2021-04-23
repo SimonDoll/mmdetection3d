@@ -133,13 +133,17 @@ class Basemetric(ABC):
 
             if not reversed_score:
                 score_valid = scores >= similarity_treshold
+                score_valid[torch.isinf(scores)] = False
             else:
                 score_valid = scores <= similarity_treshold
+                score_valid[torch.isinf(scores)] = False
 
             tp_mask = torch.logical_and(gts, score_valid)
+
             fp_mask = torch.zeros((len(scores), ), dtype=torch.bool)
             fp_mask[torch.logical_and(gts, ~score_valid)] = True
 
+            # TODO not needed any more?
             # remove entries that are ground truth only (no pred for this gt box)
             gt_only_mask = scores == float('-inf')
             fp_mask[gt_only_mask] = False

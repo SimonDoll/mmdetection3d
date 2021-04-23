@@ -748,7 +748,7 @@ class VoxelBasedPointSampler(object):
                 sampler._max_voxels - voxels.shape[0], sampler._max_num_points,
                 point_dim
             ],
-                                      dtype=points.dtype)
+                dtype=points.dtype)
             padding_points[:] = voxels[0]
             sample_points = np.concatenate([voxels, padding_points], axis=0)
         else:
