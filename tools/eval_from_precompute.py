@@ -322,6 +322,8 @@ class EvalPipeline:
         logging.info('runtime eval: {} seconds'.format(
             (end - start).total_seconds()))
 
+        return sim_measure_results
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
