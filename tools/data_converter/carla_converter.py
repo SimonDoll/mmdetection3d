@@ -178,14 +178,16 @@ def _fill_scene_infos(loader, max_prev_samples=10, lidar_name="lidar_top", ego_p
                 xyz_wlh_yaw = annotation_to_lidar(
                     annotation, current_frame_info['ego_t_lidar'], current_frame_info['ego_R_lidar'], current_frame_info['global_t_ego'], current_frame_info['global_R_ego'])
 
+                # print("yaw =", np.rad2deg(xyz_wlh_yaw[6]))
+
                 # only use velocity in the x-y plane
                 velocity = annotation.velocity[0:2]
                 gt_velocity[i] = velocity
                 # TODO double check with rotated boxes!!
-                # i think we dont need this anymore
                 # we need to convert rot to SECOND format.
-                # TODO source?
-                # xyz_wlh_yaw[6] = -xyz_wlh_yaw[6] - np.pi / 2
+                # originally they also rotated by - 180°, but only inverting seems visually correct???
+                # TODO where is the rotation format specified??? source?
+                xyz_wlh_yaw[6] = -xyz_wlh_yaw[6]
                 gt_boxes[i] = xyz_wlh_yaw
                 category_name = category_token_to_name[annotation.category_token]
                 names.append(category_name)
