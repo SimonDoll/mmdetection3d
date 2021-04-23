@@ -234,8 +234,8 @@ class EvalPipeline:
             # results dist interval is list
             # {min_dist, max_dist, pred_count, results{same as full range}}
 
-            results_full_range = self._extract_single_class_results
-            (results_full_range)
+            results_full_range = self._extract_single_class_results(
+                results_full_range)
 
             results_interval_full_names = {}
             for results_interval in results_multi_range:
