@@ -20,7 +20,7 @@ class AverageTranslationErrorPerClass(NumericClassMetric):
             reversed_score=reversed_score)
 
     def __str__(self):
-        return 'ATE@{:.2g}'.format(self.similarity_threshold)
+        return 'ATE@{}'.format(self.similarity_threshold)
 
     def compute(self, matching_results, data=None):
         decisions_per_class = self.compute_decisions(

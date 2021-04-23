@@ -33,11 +33,11 @@ class EvalPipeline:
 
     _gt_filter_bounds = [0, -40, 120, 40]
 
-    _m_ap_steps_iou = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-    _m_ap_steps_cd = [0.1, 0.5, 1.0, 2.0, 5.0]
+    _m_ap_steps_iou = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75]
+    _m_ap_steps_cd = [0.1, 0.5, 1.0, 2.0]
 
     _ap_steps_iou = [0.5, 0.75]
-    _ap_steps_cd = [0.1, 0.5, 1.0, 2.0, 5.0]
+    _ap_steps_cd = [0.1, 0.5, 1.0, 2.0]
 
     _tp_metrics_iou = 0.5
     _tp_metrics_cd = 2.0
@@ -140,9 +140,6 @@ class EvalPipeline:
         multi_range_results = self._eval_single_multi_range(
             similarity_measure,  reversed_score, pipeline, result_paths)
 
-        # MultiDistanceMetric.print_results(multi_range_results)
-
-        # TODO critical combine results here
         return full_range_results, multi_range_results
 
     def _eval_single_full_range(self, similarity_measure, reversed_score, pipeline, result_paths):
@@ -210,7 +207,6 @@ class EvalPipeline:
 
             ap_threshs = thresholds['aps']
             map_thresh_list = thresholds['map']
-
             tp_metric_thresh = thresholds['tp']
 
             # build metrics
@@ -222,17 +218,18 @@ class EvalPipeline:
             map = MeanAveragePrecision(map_thresh_list, reversed_score)
             metrics.append(map)
 
-            # TODO critical tp metrics
+            ate = AverageTranslationErrorPerClass(
+                tp_metric_thresh, reversed_score)
+            metrics.append(ate)
+
+            aoe = AverageOrientationErrorPerClass(
+                tp_metric_thresh, reversed_score)
+            metrics.append(aoe)
 
             # build up a pipeline
             pipeline = MetricPipeline(metrics)
             results_full_range, results_multi_range = self._eval_single(
                 sim_measure, reversed_score, pipeline, result_paths)
-
-            # results full range is dict 'metric' : result (class or numeric)
-
-            # results dist interval is list
-            # {min_dist, max_dist, pred_count, results{same as full range}}
 
             results_full_range = self._extract_single_class_results(
                 results_full_range)
@@ -332,7 +329,8 @@ if __name__ == '__main__':
     parser.add_argument(
         'precompute_path', help='Folder containing eval precomutes')
 
-    parser.add_argument('--out', type=str, help="file to store .json results")
+    parser.add_argument('--out', type=str,
+                        help="file to store .json results", default=None)
 
     parser.add_argument('--verbose', action='store_true',
                         help="Wether output should be printed or not")
