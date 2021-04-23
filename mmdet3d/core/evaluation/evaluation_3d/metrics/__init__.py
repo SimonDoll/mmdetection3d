@@ -14,6 +14,8 @@ from .recall_per_class import RecallPerClass
 from .false_positives_per_frame_class_metric import FalsePositivesPerFrameClassMetric
 from .false_positives_per_frame_metric import FalsePositivesPerFrame
 from .average_translation_error_class import AverageTranslationErrorPerClass
+from .average_orientation_error_class import AverageOrientationErrorPerClass
+
 __all__ = [
     'Basemetric',
     'PrecisionAtRecall',
@@ -27,5 +29,6 @@ __all__ = [
     'MultiDistanceMetric',
     'FalsePositivesPerFrameClassMetric',
     'FalsePositivesPerFrame',
-    'AverageTranslationErrorPerClass'
+    'AverageTranslationErrorPerClass',
+    'AverageOrientationErrorPerClass'
 ]
