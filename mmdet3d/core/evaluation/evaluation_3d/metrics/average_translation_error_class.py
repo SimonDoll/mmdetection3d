@@ -51,7 +51,6 @@ class AverageTranslationErrorPerClass(NumericClassMetric):
                 pred_center = match['pred_box'].gravity_center.numpy()
 
                 translation_error = np.linalg.norm(gt_center - pred_center)
-                print("gt center =", gt_center, "pred center =", pred_center)
                 summed_te += translation_error
 
             # tp_idxs is > 0
