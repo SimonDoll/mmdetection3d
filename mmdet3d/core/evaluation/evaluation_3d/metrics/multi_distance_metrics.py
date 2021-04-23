@@ -35,7 +35,8 @@ class MultiDistanceMetric:
         similarity_measure=None,
         reversed_score=False,
         additional_filter_pipeline=None,
-        gt_filter_bounds=[0, -40, 120, 40]
+        gt_filter_bounds=[0, -40, 120, 40],
+        verbose=True
     ):
         """Creates the MultiDistanceMetric.
 
@@ -72,6 +73,8 @@ class MultiDistanceMetric:
         self._distance_filter = None
 
         self._reversed_scores = reversed_score
+
+        self._verbose = verbose
 
     def _preprocess_single(self, result_path, data_id):
 
@@ -214,12 +217,15 @@ class MultiDistanceMetric:
                 pred_count_per_class[c] += preds_per_class[c]
                 pred_count += preds_per_class[c]
 
-        print("=" * 40)
-        print("Evaluating interval [{},{}), frames: {}, gt annos: {}, preds:{}".format(
-            min_distance, max_distance, len(result_paths), gt_count, pred_count))
+        if self._verbose:
+            print("=" * 40)
+            print("Evaluating interval [{},{}), frames: {}, gt annos: {}, preds:{}".format(
+                min_distance, max_distance, len(result_paths), gt_count, pred_count))
         # evaluate the metrics for this interval
         metric_results = self._metric_pipeline.evaluate(matchings_for_interval)
-        self._metric_pipeline.print_results(metric_results)
+
+        if self._verbose:
+            self._metric_pipeline.print_results(metric_results)
 
         interval_result = {
             'min_dist': min_distance,
@@ -235,7 +241,7 @@ class MultiDistanceMetric:
     def evaluate(self, result_paths):
         interval_results = []
         # -1 because interval is defined from dist[i], dist[i+1]
-        for interval_idx in tqdm(range(len(self._distance_intervals) - 1)):
+        for interval_idx in range(len(self._distance_intervals) - 1):
             min_dist = self._distance_intervals[interval_idx]
             max_dist = self._distance_intervals[interval_idx + 1]
 

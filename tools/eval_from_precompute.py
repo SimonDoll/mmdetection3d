@@ -11,6 +11,8 @@ import datetime
 import pathlib
 import json
 
+import logging
+
 import pickle
 import tqdm
 
@@ -18,6 +20,7 @@ import tqdm
 from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import *
 from mmdet3d.core.evaluation.evaluation_3d.filters import *
 from mmdet3d.core.evaluation.evaluation_3d.metrics import *
+from mmdet3d.core.evaluation.evaluation_3d import metrics as metrics
 from mmdet3d.core.evaluation.evaluation_3d.matchers import HungarianMatcher
 
 
@@ -39,11 +42,18 @@ class EvalPipeline:
     _tp_metrics_iou = 0.5
     _tp_metrics_cd = 2.0
 
-    def __init__(self, args):
-        self._precompute_path = pathlib.Path(args.precompute_path)
+    def __init__(self, precompute_path, out_file=None, verbose=True):
+        self._precompute_path = pathlib.Path(precompute_path)
 
-        print("Results are loaded from: {}".format(self._precompute_path))
+        logging.info("Results are loaded from: {}".format(
+            self._precompute_path))
         assert self._precompute_path.is_dir(), "Precomputes do not exist"
+
+        self._out_file = None
+        if out_file is not None:
+            self._out_file = pathlib.Path(out_file)
+            assert self._out_file.parent.is_dir(), "out file parent does not exist"
+            assert self._out_file.suffix == ".json", "wrong file extension for output"
 
         self._result_paths_file = self._precompute_path.joinpath(
             self._result_paths_file_name)
@@ -59,6 +69,8 @@ class EvalPipeline:
 
         # we use class ids for matching, cat2id can be used to assign a category name later on
         self._matcher = HungarianMatcher(self._cat2id.values())
+
+        self._verbose = verbose
 
     def _eval_preprocess(self, result_paths, similarity_measure, reversed_score):
         annotation_count = 0
@@ -122,7 +134,8 @@ class EvalPipeline:
         full_range_results = self._eval_single_full_range(
             similarity_measure, reversed_score, pipeline, result_paths)
 
-        MetricPipeline.print_results(full_range_results)
+        if self._verbose:
+            MetricPipeline.print_results(full_range_results)
 
         multi_range_results = self._eval_single_multi_range(
             similarity_measure,  reversed_score, pipeline, result_paths)
@@ -130,14 +143,15 @@ class EvalPipeline:
         # MultiDistanceMetric.print_results(multi_range_results)
 
         # TODO critical combine results here
-        return full_range_results,  # multi_range_results
+        return full_range_results, multi_range_results
 
     def _eval_single_full_range(self, similarity_measure, reversed_score, pipeline, result_paths):
         matchings, annotated_frames_count, non_annotated_frames_count, annotation_count = self._eval_preprocess(
             result_paths, similarity_measure, reversed_score)
 
-        print("annotated =", annotated_frames_count, "non annotated =",
-              non_annotated_frames_count, "gt count =", annotation_count)
+        if self._verbose:
+            print("annotated =", annotated_frames_count, "non annotated =",
+                  non_annotated_frames_count, "gt count =", annotation_count)
 
         eval_results = pipeline.evaluate(matchings)
         return eval_results
@@ -146,11 +160,31 @@ class EvalPipeline:
 
         metrics = MultiDistanceMetric(
             self._cat2id.values(), pipeline, self._dist_eval_intervals,
-            matcher=self._matcher, similarity_measure=similarity_measure, reversed_score=reversed_score)
+            matcher=self._matcher, similarity_measure=similarity_measure, reversed_score=reversed_score, verbose=self._verbose)
 
         eval_interval_results = metrics.evaluate(
             result_paths)
         return eval_interval_results
+
+    def _extract_single_class_results(self, results_single_range, class_id=0):
+        metric_results = {}
+        for metric_name, metric_return in results_single_range.items():
+            metric_val = None
+            if isinstance(metric_return, metrics.numeric_metric_result.NumericMetricResult):
+                # this value is a number
+                metric_val = float(metric_return())
+
+            elif isinstance(metric_return, metrics.numeric_class_metric_result.NumericClassMetricResult):
+                # pick the right class
+                assert class_id in metric_return(), "class {} not found".format(class_id)
+
+                metric_val = metric_return()[class_id]()
+
+            assert metric_name not in metric_results, "metric {} did exist already"            .format(
+                metric_name)
+
+            metric_results[metric_name] = metric_val
+        return metric_results
 
     def _eval_iterate(self, sim_measure_config, result_paths):
         """iterates all thresholds and similarity measures and evals each combination
@@ -158,11 +192,12 @@ class EvalPipeline:
         sim_measure_config (dict): dict has as keys the similarity measure name, the values are dicts {aps, map, tp : } that contain lists / a value for tp metrics thresh of the thresholds to use for the corresponding metrics
 
         """
-
+        sim_measure_results = {}
         for sim_measure_name, thresholds in sim_measure_config.items():
-            print("\n\n" + "=" * 40)
-            print("Similarity measure = : {}".format(sim_measure_name))
-            print("=" * 40)
+            if self._verbose:
+                print("\n\n" + "=" * 40)
+                print("Similarity measure: {}".format(sim_measure_name))
+                print("=" * 40)
             if sim_measure_name == "IoU":
                 sim_measure = Iou()
                 reversed_score = False
@@ -191,9 +226,39 @@ class EvalPipeline:
 
             # build up a pipeline
             pipeline = MetricPipeline(metrics)
-            results = self._eval_single(
+            results_full_range, results_multi_range = self._eval_single(
                 sim_measure, reversed_score, pipeline, result_paths)
-            # TODO do something with the results
+
+            # results full range is dict 'metric' : result (class or numeric)
+
+            # results dist interval is list
+            # {min_dist, max_dist, pred_count, results{same as full range}}
+
+            results_full_range = self._extract_single_class_results
+            (results_full_range)
+
+            results_interval_full_names = {}
+            for results_interval in results_multi_range:
+                # get the interval information
+                start_range = results_interval['min_dist']
+                end_range = results_interval['max_dist']
+
+                metric_vals = results_interval['results']
+                metric_results = self._extract_single_class_results(
+                    metric_vals)
+
+                # now append the interval to the names
+                interval_suffix = " r: [{},{})".format(start_range, end_range)
+                for key in metric_results:
+                    full_key = key + interval_suffix
+                    assert full_key not in results_interval_full_names, "key {} did exist already".format(
+                        full_key)
+                    results_interval_full_names[full_key] = metric_results[key]
+
+            sim_measure_results[sim_measure_name] = {
+                'full': results_full_range, 'interval': results_interval_full_names}
+
+        return sim_measure_results
 
     def _split_non_annoatated(self, result_paths):
         annotated = {}
@@ -225,8 +290,9 @@ class EvalPipeline:
         with open(self._result_paths_file) as fp:
             result_paths = json.load(fp)
 
-        annotated, non_annotated = self._split_non_annoatated(result_paths)
-        result_paths = list(annotated.values())
+        # TODO only use annotated?
+        # annotated, non_annotated = self._split_non_annoatated(result_paths)
+        # result_paths = list(annotated.values())
 
         start = datetime.datetime.now()
 
@@ -243,11 +309,18 @@ class EvalPipeline:
                          'CenterDistance': cd
                          }
 
-        # TODO where do we combine results and dump?
-        self._eval_iterate(thresh_config, result_paths)
+        sim_measure_results = self._eval_iterate(
+            thresh_config, result_paths)
+
+        if self._out_file is not None:
+            logging.info("storing json results to {}".format(self._out_file))
+
+            with open(self._out_file, 'w') as fp:
+                json.dump(sim_measure_results, fp, indent=4)
 
         end = datetime.datetime.now()
-        print('runtime eval millis =', (end - start).total_seconds() * 1000)
+        logging.info('runtime eval: {} seconds'.format(
+            (end - start).total_seconds()))
 
 
 if __name__ == '__main__':
@@ -257,10 +330,16 @@ if __name__ == '__main__':
     parser.add_argument(
         'precompute_path', help='Folder containing eval precomutes')
 
-    parser.add_argument(
-        '--similarity', choices=['iou', 'centerdist'], help="Used similarity measure")
+    parser.add_argument('--out', type=str, help="file to store .json results")
+
+    parser.add_argument('--verbose', action='store_true',
+                        help="Wether output should be printed or not")
 
     args = parser.parse_args()
 
-    eval_pipeline = EvalPipeline(args)
+    logging.basicConfig(
+        format='%(levelname)s: %(message)s', level=logging.INFO)
+
+    eval_pipeline = EvalPipeline(
+        args.precompute_path, args.out, args.verbose)
     eval_pipeline.run_eval()

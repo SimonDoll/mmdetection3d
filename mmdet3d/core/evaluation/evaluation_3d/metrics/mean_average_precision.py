@@ -46,7 +46,7 @@ class MeanAveragePrecision(NumericMetric):
             short_repr = False
 
         if short_repr:
-            name = 'mAP@[{:.2f},{:.2f}:{:.2f}]'.format(self._similarities[0],
+            name = 'mAP@[{:.2g},{:.2g}:{:.2g}]'.format(self._similarities[0],
                                                        self._similarities[-1], diff)
         else:
             name = 'mAP@{}'.format(self.similarities)
