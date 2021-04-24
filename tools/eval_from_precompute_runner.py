@@ -73,22 +73,9 @@ class EvalFromPrecomputeRunner:
         return combined_df
 
     def _collect_precompute_cfg_paths(self):
-        # eval base dir contains nested folders: e.g. 2_sweeps -> pp_pfn
-        # those folders should contain a .pth file (checkpoint and a .json file (precompute config))
 
-        # we use those to find valid precomputes
-        checkpoint_paths = list(self._eval_base_dir.rglob('*.pth'))
+        config_paths = list(self._eval_base_dir.rglob('*.eval_config'))
 
-        config_paths = []
-        for checkpoint_path in checkpoint_paths:
-            folder = checkpoint_path.parent.absolute().resolve()
-
-            json_files = list(folder.glob('*.json'))
-
-            assert len(json_files) == 1, "expected single config file, found {}".format(
-                json_files)
-
-            config_paths.append(json_files[0])
         return config_paths
 
     def run(self,):

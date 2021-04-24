@@ -14,28 +14,38 @@ class EvalPrecomputeRunner:
     def _run_single(self, config_file, checkpoint, out_dir_base):
 
         out_dir_test = out_dir_base.joinpath("test")
-        out_dir_test.mkdir()
+        if out_dir_test.is_dir():
+            logging.warn(
+                "Precompute {} exists already, skipping".format(out_dir_test))
+        else:
+            out_dir_test.mkdir()
+            logging.info("Running precompute for {}, mode={}, out={}".format(
+                config_file.name, "test", out_dir_test))
+
+            eval_precompute_test = EvalPrecompute(
+                str(config_file), str(checkpoint), out_dir_test, "test", seed=42, deterministic=True)
+
+            eval_precompute_test.run()
+
         out_dir_val = out_dir_base.joinpath("val")
-        out_dir_val.mkdir()
 
-        logging.info("Running precompute for {}, mode={}, out={}".format(
-            config_file.name, "test", out_dir_test))
+        if out_dir_val.is_dir():
+            logging.warn(
+                "Precompute {} exists already, skipping".format(out_dir_val))
+        else:
+            out_dir_val.mkdir()
 
-        eval_precompute_test = EvalPrecompute(
-            str(config_file), str(checkpoint), out_dir_test, "test", seed=42, deterministic=True)
+            logging.info("Running precompute for {}, mode={}, out={}".format(
+                config_file.name, "val", out_dir_val))
+            eval_precompute_val = EvalPrecompute(
+                str(config_file), str(checkpoint), out_dir_val, "val", seed=42, deterministic=True)
 
-        eval_precompute_test.run()
-
-        logging.info("Running precompute for {}, mode={}, out={}".format(
-            config_file.name, "val", out_dir_val))
-        eval_precompute_val = EvalPrecompute(
-            str(config_file), str(checkpoint), out_dir_val, "val", seed=42, deterministic=True)
-
-        eval_precompute_val.run()
+            eval_precompute_val.run()
 
     def run(self,):
         # find the config .json files assumes ony .json for configs
-        precompute_config_files = list(self._eval_base_dir.rglob('*.json'))
+        precompute_config_files = list(
+            self._eval_base_dir.rglob('*.eval_config'))
         logging.info("Found {} precompute config files".format(
             len(precompute_config_files)))
         for precompute_cfg_path in precompute_config_files:
