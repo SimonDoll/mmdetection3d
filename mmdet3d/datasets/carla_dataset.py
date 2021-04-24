@@ -14,9 +14,10 @@ from .custom_3d import Custom3DDataset
 
 from mmdet3d.core.evaluation.evaluation_3d.matchers import HungarianMatcher
 from mmdet3d.core.evaluation.evaluation_3d.similarity_measure import CenterDistance2d, Iou
-from mmdet3d.core.evaluation.evaluation_3d.metrics import AveragePrecision, MeanAveragePrecision, Recall, Precision, MetricPipeline, FalsePositivesPerFrame
+from mmdet3d.core.evaluation.evaluation_3d.metrics import AveragePrecision, MeanAveragePrecision, MetricPipeline, AverageTranslationErrorPerClass, AverageOrientationErrorPerClass
 
 from mmdet3d.core.evaluation.evaluation_3d.metrics.numeric_metric_result import NumericMetricResult
+from mmdet3d.core.evaluation.evaluation_3d.metrics.numeric_class_metric_result import NumericClassMetricResult
 
 
 @DATASETS.register_module()
@@ -98,26 +99,29 @@ class CarlaDataset(Custom3DDataset):
         # setup the metric pipeline for evaluation
         # we use class ids for matching, cat2id can be used to assign a category name later on
         self.matcher = HungarianMatcher(self.cat2id.values())
-        # similarity_meassure = Iou()
+
         self.similarity_meassure = Iou()
         # if centerpoint dist reverse matching order (lower is better)
         self.similarity_reversed_score = False
 
-        similarity_threshold = 0.5
-        # metrics
-        avg_precision_metric = AveragePrecision(
-            similarity_threshold=similarity_threshold, reversed_score=self.similarity_reversed_score)
-        mean_avg_precision_metric = MeanAveragePrecision(
-            [0.3, 0.5, 0.7, 0.9], reversed_score=self.similarity_reversed_score)
-        precision_metric = Precision(similarity_threshold)
-        recall_metric = Recall(similarity_threshold)
+        tp_thresh = 0.5
 
-        self.metric_pipeline_annotated = MetricPipeline(
-            [avg_precision_metric, mean_avg_precision_metric, recall_metric, precision_metric])
+        ap_05 = AveragePrecision(
+            similarity_threshold=0.5, reversed_score=self.similarity_reversed_score)
 
-        fppf_metric = FalsePositivesPerFrame(
-            similarity_threshold, reversed_score=self.similarity_reversed_score)
-        self.metric_pipeline_non_annoated = MetricPipeline([fppf_metric])
+        ap_075 = AveragePrecision(
+            similarity_threshold=0.75, reversed_score=self.similarity_reversed_score)
+
+        map = MeanAveragePrecision(
+            [0.5, 0.55, 0.6, 0.65, 0.7, 0.75], reversed_score=self.similarity_reversed_score)
+
+        ate = AverageTranslationErrorPerClass(
+            tp_thresh, reversed_score=self.similarity_reversed_score)
+        aoe = AverageOrientationErrorPerClass(
+            tp_thresh, reversed_score=self.similarity_reversed_score)
+
+        self.metric_pipeline = MetricPipeline(
+            [ap_05, ap_075, map, ate, aoe])
 
     def get_cat_ids(self, idx):
         """Get category distribution of single scene.
@@ -384,7 +388,8 @@ class CarlaDataset(Custom3DDataset):
 
         return matching_results_with_annotations, annotated_frames_count, annotation_count, matching_results_no_annotations, non_annotated_frames_count
 
-    def evaluate_sinlge(self, results):
+    def evaluate_sinlge(self, results, class_id=0):
+        # TODO class_id 0 is used to only evaluate the first class for per class metrics, fix this asap
 
         assert isinstance(results, list)
         assert len(results) == len(
@@ -393,20 +398,20 @@ class CarlaDataset(Custom3DDataset):
             results)
 
         # evaluate metrics on the annotated frames
-        metric_results_annotated = self.metric_pipeline_annotated.evaluate(
+        metric_results_annotated = self.metric_pipeline.evaluate(
             matching_results_with_annotations, data=None)
 
-        metric_results_non_annoated = self.metric_pipeline_non_annoated.evaluate(
+        metric_results_non_annoated = self.metric_pipeline.evaluate(
             matching_results_no_annotations, data=None)
 
         print("Results on all {} annotated frames, annotations: {} ".format(
             annotated_frames_count, annotation_count))
-        self.metric_pipeline_annotated.print_results(metric_results_annotated)
+        self.metric_pipeline.print_results(metric_results_annotated)
 
         # evaluate metrics on the non annotated frames
         print("Results on non annotated frames {}".format(
             non_annotated_frames_count))
-        self.metric_pipeline_non_annoated.print_results(
+        self.metric_pipeline.print_results(
             metric_results_non_annoated)
 
         if self._eval_point_cloud_range:
@@ -414,10 +419,17 @@ class CarlaDataset(Custom3DDataset):
                 self._eval_point_cloud_range))
 
         results_numeric_logging = {}
-        # for now only collect single numeric results of annotated frames
+        # for now only collect results of annotated frames
         for metric_name, metric_return in metric_results_annotated.items():
+            assert metric_name not in results_numeric_logging, "metric dupliate? {}".format(
+                metric_name)
             if isinstance(metric_return, NumericMetricResult):
                 results_numeric_logging[metric_name] = float(metric_return())
+            elif isinstance(metric_return, NumericClassMetricResult):
+                # pick the right class
+                assert class_id in metric_return(), "class {} not found".format(class_id)
+                metric_val = metric_return()[class_id]()
+                results_numeric_logging[metric_name] = metric_val
         return results_numeric_logging
 
     def evaluate(
