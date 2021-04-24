@@ -68,8 +68,8 @@ class EvalPrecompute:
             torch.backends.cudnn.benchmark = True
 
         self.cfg.model.pretrained = None
-        self.cfg.data.val.test_mode = False  # Assure to get ground truth
-        self.cfg.data.test.test_mode = False  # Assure to get ground truth
+        self.cfg.data.val.test_mode = True
+        self.cfg.data.test.test_mode = True
 
     def _init_data(self, mode):
         # build the dataloader
@@ -107,7 +107,13 @@ class EvalPrecompute:
         Args:
             checkpoint_file (str): Checkpoint file of trained model
         """
-        # TODO which configs?
+
+        # TODO critical backport to dataset eval interface!
+        # TODO this allows us to use models with sync bn on non distributed envs
+        import torch.distributed as dist
+        dist.init_process_group(
+            'gloo', init_method='file:///tmp/somefile', rank=0, world_size=1)
+
         self.model = build_detector(
             self.cfg.model, None, test_cfg=self.cfg.test_cfg)
         fp16_cfg = self.cfg.get('fp16', None)
