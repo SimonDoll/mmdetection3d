@@ -256,7 +256,7 @@ class Anchor3DHead(nn.Module, AnchorTrainMixin):
                 avg_factor=num_total_samples)
 
             # direction classification loss
-            loss_dir = None
+            loss_dir = torch.cuda.FloatTensor(0)
             if self.use_direction_classifier:
                 loss_dir = self.loss_dir(
                     pos_dir_cls_preds,
@@ -265,6 +265,7 @@ class Anchor3DHead(nn.Module, AnchorTrainMixin):
                     avg_factor=num_total_samples)
         else:
             loss_bbox = pos_bbox_pred.sum()
+            loss_dir = torch.cuda.FloatTensor(0)
             if self.use_direction_classifier:
                 loss_dir = pos_dir_cls_preds.sum()
 
