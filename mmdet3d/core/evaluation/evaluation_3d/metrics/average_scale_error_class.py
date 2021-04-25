@@ -89,7 +89,6 @@ class AverageScaleErrorPerClass(NumericClassMetric):
                 ase[class_id] = float("inf")
                 continue
             ase_class = summed_se / (len(tp_idxs) - invalid)
-            print(ase_class)
 
             ase[class_id] = ase_class
 
