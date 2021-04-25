@@ -15,6 +15,7 @@ from .false_positives_per_frame_class_metric import FalsePositivesPerFrameClassM
 from .false_positives_per_frame_metric import FalsePositivesPerFrame
 from .average_translation_error_class import AverageTranslationErrorPerClass
 from .average_orientation_error_class import AverageOrientationErrorPerClass
+from .average_scale_error_class import AverageScaleErrorPerClass
 
 __all__ = [
     'Basemetric',
@@ -30,5 +31,6 @@ __all__ = [
     'FalsePositivesPerFrameClassMetric',
     'FalsePositivesPerFrame',
     'AverageTranslationErrorPerClass',
-    'AverageOrientationErrorPerClass'
+    'AverageOrientationErrorPerClass',
+    'AverageScaleErrorPerClass',
 ]
