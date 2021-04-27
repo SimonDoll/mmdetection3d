@@ -42,7 +42,7 @@ class EvalPrecompute:
     _result_paths_file = "result_paths.json"
     _cat_to_id = "cat2id.json"
 
-    def __init__(self, config_file, checkpoint, out, mode, seed=42, deterministic=True):
+    def __init__(self, config_file, checkpoint, out, mode, seed=42, deterministic=True, initialize=True):
         self._init_cfg(config_file)
         # set random seeds
         if seed is not None:
@@ -58,7 +58,7 @@ class EvalPrecompute:
         self._intermediate_res_path.mkdir()
 
         self._init_data(mode)
-        self._init_model(checkpoint)
+        self._init_model(checkpoint, initialize)
 
     def _init_cfg(self, config_file):
         self.cfg = Config.fromfile(config_file)
@@ -101,18 +101,19 @@ class EvalPrecompute:
         with open(cat2id_file, 'w') as fp:
             json.dump(self.cat2id, fp, indent=4)
 
-    def _init_model(self, checkpoint_file):
+    def _init_model(self, checkpoint_file, initialize=True):
         """Initializes the detector from the config and given checkpoint.
 
         Args:
             checkpoint_file (str): Checkpoint file of trained model
         """
 
-        # TODO critical backport to dataset eval interface!
-        # TODO this allows us to use models with sync bn on non distributed envs
-        import torch.distributed as dist
-        dist.init_process_group(
-            'gloo', init_method='file:///tmp/somefile', rank=0, world_size=1)
+        if initialize:
+            # TODO critical backport to dataset eval interface!
+            # TODO this allows us to use models with sync bn on non distributed envs
+            import torch.distributed as dist
+            dist.init_process_group(
+                'gloo', init_method='file:///tmp/somefile', rank=0, world_size=1)
 
         self.model = build_detector(
             self.cfg.model, None, test_cfg=self.cfg.test_cfg)

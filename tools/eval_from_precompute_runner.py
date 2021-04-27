@@ -108,20 +108,18 @@ class EvalFromPrecomputeRunner:
             i = 0
             for dir in tqdm.tqdm(precompute_dirs):
 
-                if i > 1:
-                    break
-                i += 1
-
                 dataset_name = dir.name
 
                 if dataset_name not in self._datasets:
-                    logging.warn(
+                    logging.warning(
                         "unknown dataset folder {}, skipping".format(dataset_name))
+                    continue
 
                 # check if precompute is available
                 precompute_file = dir.joinpath(self._precompute_file)
+
                 if not precompute_file.is_file():
-                    logging.warn("no precomputes for {} in {}, skipping".format(
+                    logging.warning("no precomputes for {} in {}, skipping".format(
                         method_name, base_path))
                     continue
 
@@ -136,6 +134,8 @@ class EvalFromPrecomputeRunner:
                     # result exist already,  load
                     with open(out_file) as fp:
                         results_single = json.load(fp)
+                    logging.info(
+                        "result exists, loading from {}".format(out_file))
                 else:
                     results_single = self._run_single(dir, out_file)
 

@@ -15,30 +15,32 @@ class EvalPrecomputeRunner:
 
         out_dir_test = out_dir_base.joinpath("test")
         if out_dir_test.is_dir():
-            logging.warn(
+            logging.warning(
                 "Precompute {} exists already, skipping".format(out_dir_test))
         else:
             out_dir_test.mkdir()
             logging.info("Running precompute for {}, mode={}, out={}".format(
                 config_file.name, "test", out_dir_test))
 
+            # dont initalize each time (will raise error)
             eval_precompute_test = EvalPrecompute(
-                str(config_file), str(checkpoint), out_dir_test, "test", seed=42, deterministic=True)
+                str(config_file), str(checkpoint), out_dir_test, "test", seed=42, deterministic=True, initialize=False)
 
             eval_precompute_test.run()
 
         out_dir_val = out_dir_base.joinpath("val")
 
         if out_dir_val.is_dir():
-            logging.warn(
+            logging.warning(
                 "Precompute {} exists already, skipping".format(out_dir_val))
         else:
             out_dir_val.mkdir()
 
             logging.info("Running precompute for {}, mode={}, out={}".format(
                 config_file.name, "val", out_dir_val))
+            # dont initalize each time (will raise error)
             eval_precompute_val = EvalPrecompute(
-                str(config_file), str(checkpoint), out_dir_val, "val", seed=42, deterministic=True)
+                str(config_file), str(checkpoint), out_dir_val, "val", seed=42, deterministic=True, initialize=False)
 
             eval_precompute_val.run()
 
@@ -48,6 +50,12 @@ class EvalPrecomputeRunner:
             self._eval_base_dir.rglob('*.eval_config'))
         logging.info("Found {} precompute config files".format(
             len(precompute_config_files)))
+
+        # TODO critical: this is a workaround for distributed models
+        import torch.distributed as dist
+        dist.init_process_group(
+            'gloo', init_method='file:///tmp/somefile', rank=0, world_size=1)
+
         for precompute_cfg_path in precompute_config_files:
             precompute_config = None
             with open(precompute_cfg_path) as fp:
