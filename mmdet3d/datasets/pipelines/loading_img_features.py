@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
-
+import imgaug as ia
+import imgaug.augmenters as iaa
 
 import mmcv
 
@@ -81,38 +82,6 @@ class MultiViewImagesToList:
 
 
 @PIPELINES.register_module()
-class NormalizeMultiSweepImages:
-    """Normalizes multiple images"""
-
-    def __init__(self, mean, std, to_rgb=True) -> None:
-
-        self._mean = np.array(mean, dtype=np.float32)
-        self._std = np.array(std, dtype=np.float32)
-
-        # multi view images have the shape
-        # H x W x 3 x imgs
-        # adapt mean and std
-        self._mean = np.expand_dims(self._mean, axis=(0, 1, -1))
-        self._std = np.expand_dims(self._std, axis=(0, 1, -1))
-
-        self._to_rgb = to_rgb
-
-    def __call__(self, results):
-        # the images are H x W x 3 x images amount
-        imgs = results['img']
-
-        if self._to_rgb:
-            # TODO maybe create ascontiguousarray
-            imgs = imgs[..., ::-1, :]
-
-        imgs = np.divide((imgs - self._mean), self._std)
-
-        results['img_norm_cfg'] = dict(
-            mean=self._mean, std=self._std, to_rgb=self._to_rgb)
-        return results
-
-
-@PIPELINES.register_module()
 class ExtractFrontImageToKittiFormat:
     """Adds image rgb features to a pointcloud"""
 
@@ -136,3 +105,77 @@ class ExtractFrontImageToKittiFormat:
         results['lidar2img'] = results['img_T_lidar']
 
         return results
+
+
+@PIPELINES.register_module()
+class ImageAugmentationPipeline:
+    """Color based image augmentation pipeline.
+        Applies blur (gaus, median), shapren, contrast, grayscale  overlay, hsv colorspace"""
+
+    def __init__(
+            self, sometimes_prob=0.5, someof_range=(0, 3)):
+
+        def sometimes(aug): return iaa.Sometimes(sometimes_prob, aug)
+        # define the sequence of augmentation strageties
+
+        self._pipeline = sometimes(
+            iaa.SomeOf(someof_range,
+                       [
+                           # Sharpen each image, overlay the result with the original
+                           # image using an alpha between 0 (no sharpening) and 1
+                           # (full sharpening effect).
+                           iaa.Sharpen(alpha=(0, 1.0),
+                                       lightness=(0.75, 1.5)),
+
+                           # Improve or worsen the contrast of images.
+                           iaa.LinearContrast(
+                               (0.5, 1.5), per_channel=0.5),
+
+                           # shift color by -50, 50° in HSV color space
+                           iaa.OneOf([
+                               iaa.AddToHue((-50, 50)),
+                               iaa.AddToHueAndSaturation(
+                                   (-50, 50), per_channel=True)
+                           ]),
+
+                           # Either drop randomly 1 to 10% of all pixels (i.e. set
+                           # them to black) or drop them on an image with 2-5% percent
+                           # of the original size, leading to large dropped
+                           # rectangles.
+                           # otherwise apply gaussian blur
+                           iaa.OneOf([
+                               iaa.Dropout((0.01, 0.1), per_channel=0.5),
+                               iaa.CoarseDropout(
+                                   (0.03, 0.15), size_percent=(0.02, 0.05),
+                                   per_channel=0.2
+                               ),
+                               # gaussian blur (sigma between 0 and 3.0),
+                               iaa.GaussianBlur((0, 3.0)),
+                           ]),
+
+                           # Add a value of -10 to 10 to each pixel.
+                           iaa.Add((-10, 10), per_channel=0.5),
+
+                           # Convert each image to grayscale and then overlay the
+                           # result with the original with random alpha. I.e. remove
+                           # colors with varying strengths.
+                           sometimes(iaa.Grayscale(alpha=(0.0, 1.0))),
+
+                       ],
+                       # do all of the above augmentations in random order
+                       random_order=True)
+
+        )
+
+    def __call__(self, results):
+        for cam_name in results['camera_names']:
+            img = results[cam_name]
+            augmented = self._pipeline.augment_image(img)
+            results[cam_name] = augmented
+
+        return results
+
+    def __repr__(self):
+        """str: Return a string that describes the module."""
+        return "".format(
+            self.__class__.__name__)
