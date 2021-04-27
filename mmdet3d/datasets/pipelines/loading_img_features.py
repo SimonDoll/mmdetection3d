@@ -121,6 +121,16 @@ class ImageAugmentationPipeline:
         self._pipeline = sometimes(
             iaa.SomeOf(someof_range,
                        [
+                           # converts to HSV
+                           # alters Hue in range -50,50°
+                           # multiplies saturation
+                           # converts back
+                           iaa.WithHueAndSaturation([
+                               iaa.WithChannels(0, iaa.Add((-50, 50))),
+                               iaa.WithChannels(1, [
+                                   iaa.Multiply((0.5, 1.5)),
+                               ]),
+                           ]),
                            # Sharpen each image, overlay the result with the original
                            # image using an alpha between 0 (no sharpening) and 1
                            # (full sharpening effect).
@@ -130,13 +140,6 @@ class ImageAugmentationPipeline:
                            # Improve or worsen the contrast of images.
                            iaa.LinearContrast(
                                (0.5, 1.5), per_channel=0.5),
-
-                           # shift color by -50, 50° in HSV color space
-                           iaa.OneOf([
-                               iaa.AddToHue((-50, 50)),
-                               iaa.AddToHueAndSaturation(
-                                   (-50, 50), per_channel=True)
-                           ]),
 
                            # Either drop randomly 1 to 10% of all pixels (i.e. set
                            # them to black) or drop them on an image with 2-5% percent
