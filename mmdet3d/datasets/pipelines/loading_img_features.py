@@ -171,9 +171,14 @@ class ImageAugmentationPipeline:
         )
 
     def __call__(self, results):
+
+        # we want to apply the same augmentation for each camera
+        # -> generate a deterministic pipeline for this batch
+        curr_pipeline = self._pipeline.to_deterministic()
+
         for cam_name in results['camera_names']:
             img = results[cam_name]
-            augmented = self._pipeline.augment_image(img)
+            augmented = curr_pipeline.augment_image(img)
             results[cam_name] = augmented
 
         return results
