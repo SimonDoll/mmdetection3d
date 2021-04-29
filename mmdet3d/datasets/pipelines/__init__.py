@@ -29,7 +29,7 @@ from .loading_point_augmentation import AugmentPrevPointsWithImageFeatures
 from .loading_custom import LoadPrevPointsFromFile
 
 from .loading_img_features import ExtractFrontImageToKittiFormat, RGBA2RGB, MultiViewImagesToList, ImageAugmentationPipeline
-from .loading_depth_map import PointsToDepthMap, DepthMapToPoints, SparseToDense
+from .loading_depth_map import PointsToDepthMap, DepthMapToPoints, SparseToDense, PointsToFile, LoadSparse2DensePrecompute
 
 __all__ = [
     "ObjectSample",
@@ -63,5 +63,7 @@ __all__ = [
     "PointsToDepthMap",
     "DepthMapToPoints",
     "SparseToDense",
+    "PointsToFile",
+    "LoadSparse2DensePrecompute",
     "ImageAugmentationPipeline",
 ]

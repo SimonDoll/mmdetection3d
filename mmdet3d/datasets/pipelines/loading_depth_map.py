@@ -1,8 +1,8 @@
+import pathlib
+
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
-
-
 import mmcv
 
 from mmdet.datasets import PIPELINES
@@ -212,6 +212,110 @@ class DepthMapToPoints:
 
         results['points'] = points
 
+        return results
+
+
+@PIPELINES.register_module()
+class PointsToFile:
+    """Stores the pointcloud to a file (used for precomputes of sparse2dense)"""
+
+    def __init__(
+        self,
+        points_folder="lidar_upsampled",
+        points_prefix="lidar_upsampled",
+        points_prefix_to_remove="lidar_top"
+    ):
+        self._points_folder = points_folder
+        self._points_prefix = points_prefix
+        self._points_prefix_to_remove = points_prefix_to_remove
+
+    def __call__(self, results):
+
+        orig_path = results['pts_filename']
+        # construct the file for the pseudo sensor
+        orig_path = pathlib.Path(orig_path)
+
+        # assumes sweeps/sensor_name/sensor.bla
+        sensor_data_root = orig_path.parents[1]
+
+        out_root = sensor_data_root.joinpath(self._points_folder)
+        out_root.mkdir(exist_ok=True)
+
+        points = results["points"].tensor.detach().cpu().numpy()
+
+        # check that the input file is of known structure
+        assert orig_path.stem.startswith(
+            self._points_prefix_to_remove), "path to orig sensor is not of known structure {}".format(orig_path)
+
+        out_file_name = self._points_prefix + orig_path.stem[len(
+            self._points_prefix_to_remove):] + ".bin"
+        out_file_path = out_root.joinpath(out_file_name)
+
+        points.astype(np.float32).tofile(out_file_path)
+
+        return results
+
+
+@PIPELINES.register_module()
+class LoadSparse2DensePrecompute:
+    """Augments the lidar pointcloud with the sparse2dense precompute points"""
+
+    def __init__(
+        self,
+        points_folder="lidar_upsampled",
+        points_prefix="lidar_upsampled",
+        points_prefix_to_remove="lidar_top"
+    ):
+        self._points_folder = points_folder
+        self._points_prefix = points_prefix
+        self._points_prefix_to_remove = points_prefix_to_remove
+
+    def __call__(self, results):
+
+        orig_path = results['pts_filename']
+        # construct the file for the pseudo sensor
+        orig_path = pathlib.Path(orig_path)
+
+        # assumes sweeps/sensor_name/sensor.bla
+        sensor_data_root = orig_path.parents[1]
+
+        augmented_root = sensor_data_root.joinpath(self._points_folder)
+
+        # check that the input file is of known structure
+        assert orig_path.stem.startswith(
+            self._points_prefix_to_remove), "path to orig sensor is not of known structure {}".format(orig_path)
+
+        augmented_file_name = self._points_prefix + orig_path.stem[len(
+            self._points_prefix_to_remove):] + ".bin"
+        augmented_file_path = augmented_root.joinpath(augmented_file_name)
+
+        # load the points back
+        aug_points = np.fromfile(augmented_file_path, dtype=np.float32)
+        # aug points are x y z only
+        aug_points = aug_points.reshape((-1, 3))
+
+        aug_points = torch.from_numpy(aug_points)
+
+        # now merge with lidar cloud
+        # for now we simply concatenate the clouds
+        lidar_points = results['points']
+
+        if lidar_points.shape[-1] == 3:
+            # points are x y z
+            lidar_points.tensor = torch.cat(
+                [lidar_points.tensor, aug_points], dim=0)
+        elif lidar_points.shape[-1] == 4:
+            # points are x y z i
+            # add a 0 for the intensity dim
+            aug_points = torch.cat(
+                [aug_points, torch.zeros((len(aug_points), 1))], dim=1)
+            lidar_points.tensor = torch.cat(
+                [lidar_points.tensor, aug_points], dim=0)
+        else:
+            raise ValueError("points have wrong dimensions, expected 3 or 4, got {}".format(
+                lidar_points.shape))
+
+        results['points'] = lidar_points
         return results
 
 
