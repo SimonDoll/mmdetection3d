@@ -342,11 +342,13 @@ class SparseToDense:
         self._model = self._build_model(state_dict)
 
     def _build_model(self, state_dict, in_channels=4, layers=18, decoder="deconv3",):
+        # build the model (non pretrained for no internet)
         model = sparse_to_dense.models.ResNet(
-            layers=layers, decoder=decoder, output_size=self._output_size, in_channels=in_channels)
+            layers=layers, decoder=decoder, output_size=self._output_size, in_channels=in_channels, pretrained=False)
 
         model = torch.nn.DataParallel(model).cuda()
 
+        # load the trained weights
         model.load_state_dict(state_dict)
         model.eval()
         return model
