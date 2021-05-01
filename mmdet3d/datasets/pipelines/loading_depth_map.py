@@ -264,11 +264,16 @@ class LoadSparse2DensePrecompute:
         self,
         points_folder="lidar_upsampled",
         points_prefix="lidar_upsampled",
-        points_prefix_to_remove="lidar_top"
+        points_prefix_to_remove="lidar_top",
+        pcd_range=(0, 120, -15, 15, -3, 0)
     ):
         self._points_folder = points_folder
         self._points_prefix = points_prefix
         self._points_prefix_to_remove = points_prefix_to_remove
+
+        self._pcd_range = pcd_range
+        assert len(
+            self._pcd_range) == 6, "pcd range should be (x_min, x_max, y_min, y_max, z_min,z_max"
 
     def __call__(self, results):
 
@@ -296,6 +301,21 @@ class LoadSparse2DensePrecompute:
 
         aug_points = torch.from_numpy(aug_points)
 
+        # filter out unrealistic points to reduce the memory footprint
+        aug_points_mask_x = torch.logical_and(
+            aug_points[:, 0] >= self._pcd_range[0], aug_points[:, 0] <= self._pcd_range[1])
+
+        aug_points_mask_y = torch.logical_and(
+            aug_points[:, 1] >= self._pcd_range[2], aug_points[:, 1] <= self._pcd_range[3])
+        aug_points_mask_z = torch.logical_and(
+            aug_points[:, 2] >= self._pcd_range[4], aug_points[:, 2] <= self._pcd_range[5])
+
+        aug_points_mask = torch.logical_and(
+            aug_points_mask_x, aug_points_mask_y)
+        aug_points_mask = torch.logical_and(aug_points_mask, aug_points_mask_z)
+
+        aug_points = aug_points[aug_points_mask]
+
         # now merge with lidar cloud
         # for now we simply concatenate the clouds
         lidar_points = results['points']
@@ -319,7 +339,7 @@ class LoadSparse2DensePrecompute:
         return results
 
 
-@PIPELINES.register_module()
+@ PIPELINES.register_module()
 class SparseToDense:
     """Upsamples the point cloud utilizing the sparse to dense approach.
     """
