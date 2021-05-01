@@ -265,7 +265,7 @@ class LoadSparse2DensePrecompute:
         points_folder="lidar_upsampled",
         points_prefix="lidar_upsampled",
         points_prefix_to_remove="lidar_top",
-        pcd_range=(0, 120, -15, 15, -3, 0)
+        pcd_range=(0, 100, -12, 12, -3, 0)
     ):
         self._points_folder = points_folder
         self._points_prefix = points_prefix
