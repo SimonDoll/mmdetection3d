@@ -24,6 +24,7 @@ carla_categories = (
 train_set_folder_name = "train"
 val_set_folder_name = "val"
 test_set_folder_name = "test"
+easy_test_set_folder_name = "easy_test"
 
 
 def create_carla_infos(
@@ -67,6 +68,13 @@ def create_carla_infos(
     test_infos, test_meta = _run_for_set(
         test_set, balance, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
 
+    # extensions:
+    # easy test
+    easy_test_set = root_path.joinpath(easy_test_set_folder_name)
+    easy_test_infos, easy_test_meta = _run_for_set(
+        easy_test_set, balance, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
+ 
+
     print("train samples: {}".format(len(train_infos)))
     data = dict(infos=train_infos, metadata=train_meta)
     info_path = osp.join(
@@ -83,6 +91,11 @@ def create_carla_infos(
     data = dict(infos=test_infos, metadata=test_meta)
     info_path = osp.join(
         root_path, "{}_infos_test.pkl".format(info_prefix))
+
+    print("easy_test samples: {}".format(len(easy_test_infos)))
+    data = dict(infos=easy_test_infos, metadata=easy_test_meta)
+    info_path = osp.join(
+        root_path, "{}_infos_easy_test.pkl".format(info_prefix))
     mmcv.dump(data, info_path)
 
 

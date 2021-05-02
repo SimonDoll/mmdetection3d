@@ -117,9 +117,9 @@ def carla_data_prep(root_path, info_prefix, version, dataset_name, out_dir, max_
     info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
     info_val_path = osp.join(root_path, f"{info_prefix}_infos_val.pkl")
 
-    create_groundtruth_database(
-        dataset_name, root_path, info_prefix, f"{out_dir}/{info_prefix}_infos_train.pkl"
-    )
+    # create_groundtruth_database(
+    #     dataset_name, root_path, info_prefix, f"{out_dir}/{info_prefix}_infos_train.pkl"
+    # )
 
     import pathlib
     info_train_path = osp.join(root_path, f"{info_prefix}_infos_train.pkl")
@@ -138,6 +138,13 @@ def carla_data_prep(root_path, info_prefix, version, dataset_name, out_dir, max_
         carla_data_converter.test_set_folder_name)
     carla_data_converter.export_2d_annotation(
         test_set_folder, info_test_path)
+
+    # add extensions
+    info_easy_test_path = osp.join(root_path, f"{info_prefix}_infos_easy_test.pkl")
+    easy_test_set_folder = pathlib.Path(root_path).joinpath(
+        carla_data_converter.easy_test_set_folder_name)
+    carla_data_converter.export_2d_annotation(
+        easy_test_set_folder, info_easy_test_path) 
 
 
 def lyft_data_prep(
