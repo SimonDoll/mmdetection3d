@@ -14,7 +14,7 @@ from tools.eval_from_precompute import EvalPipeline
 class EvalFromPrecomputeRunner:
     _precompute_file = "result_paths.json"
 
-    _datasets = ["val", "test"]
+    _datasets = ["val", "test", "easy_test"]
 
     def __init__(self, eval_base_dir, out_folder) -> None:
         self._eval_base_dir = pathlib.Path(eval_base_dir)
