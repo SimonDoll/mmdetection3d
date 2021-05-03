@@ -44,6 +44,21 @@ class EvalPrecomputeRunner:
 
             eval_precompute_val.run()
 
+        out_dir_easy_test = out_dir_base.joinpath("easy_test")
+        if out_dir_easy_test.is_dir():
+            logging.warning(
+                "Precompute {} exists already, skipping".format(out_dir_easy_test))
+        else:
+            out_dir_easy_test.mkdir()
+
+            logging.info("Running precompute for {}, mode={}, out={}".format(
+                config_file.name, "easy_test", out_dir_easy_test))
+            # dont initalize each time (will raise error)
+            eval_precompute_val = EvalPrecompute(
+                str(config_file), str(checkpoint), out_dir_easy_test, "easy_test", seed=42, deterministic=True, initialize=False)
+
+            eval_precompute_val.run()
+
     def run(self,):
         # find the config .json files assumes ony .json for configs
         precompute_config_files = list(
