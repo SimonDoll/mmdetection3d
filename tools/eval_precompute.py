@@ -82,6 +82,13 @@ class EvalPrecompute:
             dataset = build_dataset(self.cfg.data.test)
         elif mode == "val":
             dataset = build_dataset(self.cfg.data.val)
+        elif mode == "easy_test":
+            # use the regular test config but change the ann file to the extension test set
+            data_root = pathlib.Path(self.cfg.data.test.ann_file).parent
+            easy_test_ann_file = data_root.joinpath(
+                "carla_infos_easy_test.pkl")
+            self.cfg.data.test.ann_file = str(easy_test_ann_file)
+            dataset = build_dataset(self.cfg.data.test)
         else:
             raise ValueError("unsupportet dataset type {}".format(mode))
 
@@ -221,7 +228,7 @@ if __name__ == '__main__':
     )
 
     parser.add_argument(
-        "--mode", type=str, choices=["train", "test", "val"], help="Dataset to use", default="test")
+        "--mode", type=str, choices=["train", "test", "val", "easy_test"], help="Dataset to use", default="test")
 
     args = parser.parse_args()
 

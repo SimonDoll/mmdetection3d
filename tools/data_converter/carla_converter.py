@@ -73,7 +73,6 @@ def create_carla_infos(
     easy_test_set = root_path.joinpath(easy_test_set_folder_name)
     easy_test_infos, easy_test_meta = _run_for_set(
         easy_test_set, balance, max_prev_samples, lidar_name, ego_pose_sensor_name, camera_names)
- 
 
     print("train samples: {}".format(len(train_infos)))
     data = dict(infos=train_infos, metadata=train_meta)
