@@ -12,13 +12,18 @@ import tqdm
 
 from tools.eval_from_precompute import EvalPipeline
 
+# use seaborn style plots
+import seaborn as sns
+sns.set()
+
 
 class EvalFromPrecomputeRunner:
     _precompute_file = "result_paths.json"
 
     _datasets = ["val", "test", "easy_test"]
 
-    _re_extract_interval_start = re.compile("^(.*?)r: \[(\d+)")
+    _plot_metric_iou = "AP@0.5"
+    _plot_metric_cd = "AP@0.1"
 
     def __init__(self, eval_base_dir, out_folder) -> None:
         self._eval_base_dir = pathlib.Path(eval_base_dir)
@@ -170,7 +175,18 @@ class EvalFromPrecomputeRunner:
                     else:
                         full_df = full_df.append(df)
 
-                self.plot_interval(full_df, dataset, sim_measure)
+                plot_metric = None
+                if sim_measure == "IoU":
+                    plot_metric = self._plot_metric_iou
+                elif sim_measure == "CenterDistance":
+                    plot_metric = self._plot_metric_cd
+                else:
+                    logging.warning(
+                        "ignoring unknown sim measure {} for plotting".format(sim_measure))
+
+                if plot_metric:
+                    self.plot_interval(
+                        full_df, dataset, sim_measure, self._out_base, plot_metric)
 
                 # round to 4 decimals
                 full_df = full_df.round(decimals=4)
@@ -281,7 +297,7 @@ class EvalFromPrecomputeRunner:
 
     #     plt.p
 
-    def plot_interval(self, results_df, dataset, sim_measure, metric_name="AP@0.5"):
+    def plot_interval(self, results_df, dataset, sim_measure, out_root, metric_name="AP@0.5"):
         full_metric_name = metric_name + " r:"
         column_name_regex = full_metric_name + "|method"
         print(results_df)
@@ -295,20 +311,25 @@ class EvalFromPrecomputeRunner:
         results_df = results_df.rename(columns=remove_metric_name)
 
         results_df = results_df.set_index('method')
+        # prevent index to be shown in legend
+        results_df.index.name = None
 
         results_df = results_df.T
 
-        print(results_df)
         ax = results_df.plot()
 
         ax.set_xlabel("Range interval")
         ax.set_ylabel(metric_name)
 
+        ax.set_title(dataset + " " + sim_measure, fontsize=20)
+
         fig = ax.get_figure()
 
-        fig.savefig('/workspace/work_dirs/debug/figure.pdf')
+        out_root = pathlib.Path(out_root)
+        out_path = out_root.joinpath(
+            "interval_plot_{}_{}.pdf".format(dataset, sim_measure))
 
-        exit(0)
+        fig.savefig(out_path)
 
 
 if __name__ == "__main__":
