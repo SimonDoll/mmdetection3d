@@ -51,6 +51,11 @@ class EvalPrecomputeRunner:
         logging.info("Found {} precompute config files".format(
             len(precompute_config_files)))
 
+        # do a short sanity check whether all config files exist
+        for cfg_file in precompute_config_files:
+            assert cfg_file.is_file(), "config {} not found".format(cfg_file)
+
+
         # TODO critical: this is a workaround for distributed models
         import torch.distributed as dist
         dist.init_process_group(
