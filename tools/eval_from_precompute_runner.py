@@ -2,8 +2,10 @@ import argparse
 import pathlib
 import logging
 import json
-from unicodedata import decimal
+import re
+from functools import cmp_to_key
 
+import numpy as np
 import pandas as pd
 from tabulate import tabulate
 import tqdm
@@ -15,6 +17,8 @@ class EvalFromPrecomputeRunner:
     _precompute_file = "result_paths.json"
 
     _datasets = ["val", "test", "easy_test"]
+
+    _re_extract_interval_start = re.compile("^(.*?)r: \[(\d+)")
 
     def __init__(self, eval_base_dir, out_folder) -> None:
         self._eval_base_dir = pathlib.Path(eval_base_dir)
@@ -65,7 +69,7 @@ class EvalFromPrecomputeRunner:
             else:
                 return name
 
-        combined_df.rename(columns=two_line_name, inplace=True)
+        # combined_df.rename(columns=two_line_name, inplace=True)
         combined_df.rename(columns=remove_map_interval, inplace=True)
 
         combined_df.insert(0, "method", [method_name], allow_duplicates=False)
@@ -95,6 +99,8 @@ class EvalFromPrecomputeRunner:
             dataset_out_folders[dataset_name] = dataset_out_folder
 
         eval_results = {dataset_name: {} for dataset_name in self._datasets}
+        eval_results_dicts = {dataset_name: {}
+                              for dataset_name in self._datasets}
 
         for precompute_cfg_path in precompute_config_files:
             # we use the config name as result name
@@ -143,12 +149,14 @@ class EvalFromPrecomputeRunner:
                     # create dict for this eval type
                     if not similarity_measure in eval_results[dataset_name]:
                         eval_results[dataset_name][similarity_measure] = {}
-
+                        eval_results_dicts[dataset_name][similarity_measure] = {
+                        }
                     # convert results to dataframe
                     eval_res_single_df = self._eval_results_to_df(
                         eval_res_single, method_name)
 
                     # store results
+                    eval_results_dicts[dataset_name][similarity_measure][method_name] = eval_res_single
                     eval_results[dataset_name][similarity_measure][method_name] = eval_res_single_df
 
         # now store all results
@@ -161,6 +169,8 @@ class EvalFromPrecomputeRunner:
                         full_df = df
                     else:
                         full_df = full_df.append(df)
+
+                self.plot_interval(full_df, dataset, sim_measure)
 
                 # round to 4 decimals
                 full_df = full_df.round(decimals=4)
@@ -181,6 +191,124 @@ class EvalFromPrecomputeRunner:
                     table = tabulate(full_df.values,
                                      full_df.columns, tablefmt="pipe")
                     outputfile.write(table)
+
+    # def _plot_single(self, dataset, sim_measure, method_results, metric_identifier="AP@0.5"):
+    #     # for each method extract the interval values
+    #     interval_results = []
+    #     interval_starts = []
+    #     interval_ends = []
+
+    #     filtered_method_results = []
+
+    #     for method, results in method_results.items():
+    #         interval_res = results['interval']
+    #         intervals = []
+    #         for full_metric_name, metric_result in interval_res.items():
+    #             match_name = re.search("([^\s]+)", full_metric_name)
+    #             metric_name = match_name.group()
+
+    #             if metric_name == metric_identifier:
+
+    #             filtered_method_results.append({
+    #                 'method':  method,
+    #                 'interval': full_metric_name,
+    #                 'value': metric_result
+    #             })
+
+    #     res_df = pd.DataFrame(filtered_method_results)
+    #     print(res_df)
+
+    # def _plot_single(self, dataset, sim_measure, method_results, metric_identifier="AP@0.5"):
+    #     # for each method extract the interval values
+    #     interval_results = []
+    #     interval_starts = []
+    #     interval_ends = []
+
+    #     filtered_method_results = {}
+
+    #     for method, results in method_results.items():
+    #         interval_res = results['interval']
+    #         for full_metric_name, metric_result in interval_res.items():
+    #             # match the interval start in each metric name
+    #             match_interval_start = re.search(
+    #                 'r: \[(\d+)', full_metric_name)
+    #             match_interval_end = re.search(
+    #                 "r: \[\d+,(\d+)", full_metric_name)
+    #             match_name = re.search("([^\s]+)", full_metric_name)
+
+    #             interval_end = match_interval_end.group(1)
+    #             interval_start = match_interval_start.group(1)
+
+    #             metric_name = match_name.group()
+    #             if metric_name == metric_identifier:
+    #                 if not method in filtered_method_results:
+    #                     filtered_method_results[method] = []
+    #                 filtered_method_results[method].append({'start': float(interval_start),
+    #                                                         'end': float(interval_end),
+    #                                                         'val': float(metric_result)})
+
+    #     def sort_by_interval(e1, e2):
+    #         if e1['start'] < e2['start']:
+    #             return -1
+    #         elif e1['start'] > e2['start']:
+    #             return 1
+    #         else:
+    #             return 0
+
+    #     # sort by interval start border and check that all intervals are the same
+
+    #     method_names = []
+    #     interval_borders = None
+    #     amount_intervals = None
+    #     method_plot_vals = []
+    #     for method in filtered_method_results:
+    #         filtered_method_results[method].sort(
+    #             key=cmp_to_key(sort_by_interval))
+
+    #         if amount_intervals is None:
+    #             amount_intervals = len(filtered_method_results[method])
+
+    #         assert amount_intervals == len(filtered_method_results[method])
+
+    #         method_vals = list(
+    #             map(lambda e: e['val'], filtered_method_results[method]))
+
+    #         interval_borders = list(
+    #             map(lambda e: e['start'], filtered_method_results[method]))
+
+    #         method_plot_vals.append(method_vals)
+    #         method_names.append(method)
+
+    #     plt.p
+
+    def plot_interval(self, results_df, dataset, sim_measure, metric_name="AP@0.5"):
+        full_metric_name = metric_name + " r:"
+        column_name_regex = full_metric_name + "|method"
+        print(results_df)
+        # only take desired metric for all methods
+        # methods x intervals
+        results_df = results_df.filter(regex=column_name_regex)
+
+        # beatuify the names by removing the method name
+        def remove_metric_name(name):
+            return name.replace(full_metric_name, "")
+        results_df = results_df.rename(columns=remove_metric_name)
+
+        results_df = results_df.set_index('method')
+
+        results_df = results_df.T
+
+        print(results_df)
+        ax = results_df.plot()
+
+        ax.set_xlabel("Range interval")
+        ax.set_ylabel(metric_name)
+
+        fig = ax.get_figure()
+
+        fig.savefig('/workspace/work_dirs/debug/figure.pdf')
+
+        exit(0)
 
 
 if __name__ == "__main__":
