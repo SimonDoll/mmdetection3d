@@ -226,6 +226,11 @@ class EvalPipeline:
                 tp_metric_thresh, reversed_score)
             metrics.append(aoe)
 
+            ase = AverageScaleErrorPerClass(
+                tp_metric_thresh, reversed_score)
+            metrics.append(ase)
+
+
             # build up a pipeline
             pipeline = MetricPipeline(metrics)
             results_full_range, results_multi_range = self._eval_single(
