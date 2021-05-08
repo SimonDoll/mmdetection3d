@@ -4,9 +4,13 @@ import logging
 import json
 
 from tools.eval_precompute import EvalPrecompute
+from tools.benchmark import RuntimeCalculator
 
 
 class EvalPrecomputeRunner:
+
+    _fuse_conv = True
+    _runtime_samples = 2000
 
     def __init__(self, eval_base_dir) -> None:
         self._eval_base_dir = pathlib.Path(eval_base_dir)
@@ -59,6 +63,19 @@ class EvalPrecomputeRunner:
 
             eval_precompute_val.run()
 
+        # finally compute the runtime
+        runtime_file = out_dir_base.joinpath("runtime.json")
+        logging.info("Computing runtime for {}, out: {}".format(
+            config_file.name, runtime_file))
+
+        if runtime_file.is_file():
+            logging.warning(
+                "Runtime measured already, skipping".format(runtime_file))
+        else:
+            runtime_calc = RuntimeCalculator(str(config_file), str(
+                checkpoint), initialize=False, fuse_conv=self._fuse_conv)
+            runtime_calc.run(100, out_file=str(runtime_file))
+
     def run(self,):
         # find the config .json files assumes ony .json for configs
         precompute_config_files = list(
@@ -69,7 +86,6 @@ class EvalPrecomputeRunner:
         # do a short sanity check whether all config files exist
         for cfg_file in precompute_config_files:
             assert cfg_file.is_file(), "config {} not found".format(cfg_file)
-
 
         # TODO critical: this is a workaround for distributed models
         import torch.distributed as dist
