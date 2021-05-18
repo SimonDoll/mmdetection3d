@@ -74,7 +74,7 @@ class EvalPrecomputeRunner:
         else:
             runtime_calc = RuntimeCalculator(str(config_file), str(
                 checkpoint), initialize=False, fuse_conv=self._fuse_conv)
-            runtime_calc.run(100, out_file=str(runtime_file))
+            runtime_calc.run(self._runtime_samples, out_file=str(runtime_file))
 
     def run(self,):
         # find the config .json files assumes ony .json for configs
